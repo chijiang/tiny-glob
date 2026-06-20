@@ -697,3 +697,156 @@ button.primary:hover:not(:disabled) {
   display: inline-block;
 }
 
+/* ===== 窄屏(手机)适配 =====
+   断点 640px。核心改动:
+   - 侧栏面板(npc/friends)→ 全宽底部抽屉,不再挤成 38vw 的窄条
+   - 事件简述 → 顶部紧凑横条(避免被底部抽屉盖住)
+   - 顶栏 auth 收紧(藏邮箱、缩按钮),腾出空间给品牌
+   - toast 移到底部,避开顶部简述
+*/
+@media (max-width: 640px) {
+  .brand {
+    top: 12px;
+    left: 14px;
+    font-size: 15px;
+  }
+  .brand-dot {
+    width: 8px;
+    height: 8px;
+  }
+
+  /* 顶栏 auth:藏邮箱,只剩按钮,避免和 brand 挤一条 */
+  .auth-slot {
+    top: 10px;
+    right: 12px;
+    gap: 6px;
+  }
+  .auth-email {
+    display: none;
+  }
+  .auth-trigger,
+  .friends-trigger,
+  .auth-logout {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  /* 居中提示文字上提一点,避免被底部抽屉碰到 */
+  .hint-floating {
+    transform: translate(-50%, 60px);
+    font-size: 12px;
+    padding: 0 12px;
+    text-align: center;
+  }
+
+  /* TimePicker / 通用卡片:几乎全宽 */
+  .overlay-card {
+    width: min(360px, 94vw);
+    padding: 18px 18px;
+  }
+
+  /* 事件简述:从左下挪到顶部紧凑横条
+     (放底部会被全宽 NPC 抽屉盖住) */
+  .event-brief {
+    top: 54px;
+    left: 10px;
+    right: 10px;
+    bottom: auto;
+    width: auto;
+    max-height: 110px;
+    overflow-y: auto;
+    padding: 10px 12px;
+    border-radius: 12px;
+  }
+  .event-brief .place {
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+  .event-brief .summary {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  /* NPC 对话面板:全宽底部抽屉 */
+  .npc-panel {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: min(72vh, 560px);
+    border-radius: 16px 16px 0 0;
+    /* iOS 安全区:输入框别被 home indicator 压 */
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  /* 抽屉顶部留个视觉抓手 */
+  .npc-header {
+    padding: 12px 14px 10px;
+  }
+  .npc-name {
+    font-size: 15px;
+    padding-right: 84px; /* 给 mode/save/close 三个按钮让位 */
+  }
+  .npc-meta {
+    font-size: 12px;
+  }
+
+  /* 朋友面板:同样全宽底部抽屉 */
+  .friends-panel {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: min(72vh, 560px);
+    border-radius: 16px 16px 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  .friends-header {
+    padding: 12px 14px;
+  }
+
+  /* 对话气泡放宽,占满窄屏 */
+  .bubble {
+    max-width: 88%;
+    font-size: 13.5px;
+  }
+
+  /* 输入框行:输入框别被发送按钮压太狠 */
+  .chat-input {
+    padding: 10px;
+    gap: 6px;
+  }
+  .chat-input input {
+    padding: 8px 10px;
+  }
+
+  /* toast 全部移到底部,避开顶部的事件简述 */
+  .toast {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    transform: none;
+    max-width: none;
+    font-size: 12.5px;
+    padding: 10px 14px;
+  }
+  .toast.busy {
+    top: auto;
+    bottom: 10px;
+  }
+
+  /* modal 留点边距,看得到一点背景 */
+  .modal {
+    width: 92vw;
+    padding: 16px 18px 18px;
+  }
+
+  /* 城市标签:tier-4/5 在窄屏上字太小看不清,直接藏掉
+     (tier 1-3 的城市在手机上够定位用) */
+  .globe-city-label.tier-4,
+  .globe-city-label.tier-5 {
+    display: none;
+  }
+}
+
