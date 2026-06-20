@@ -1,0 +1,56 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  friends      Friend[]
+}
+
+model Friend {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // NPC 身份快照
+  name            String
+  age             Int
+  gender          String
+  occupation      String
+  family          String
+  personality     String
+  openingLine     String
+  // 续聊 grounding 上下文
+  mode            String // 'character' | 'bystander'
+  placeName       String
+  country         String
+  year            Int
+  month           Int
+  userLang        String
+  sensitiveReason String?
+  events          Json // WikiEvent[]
+  lat             Float?
+  lng             Float?
+  createdAt       DateTime @default(now())
+  messages        Message[]
+
+  @@index([userId])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  friendId  String
+  friend    Friend   @relation(fields: [friendId], references: [id], onDelete: Cascade)
+  role      String // 'user' | 'assistant'
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([friendId])
+}
