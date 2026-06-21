@@ -2,50 +2,56 @@
 
 import { useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
+import { getStore } from '@/lib/conversation-store';
 
 type Props = {
-  onOpenFriends?: () => void;
-  friendsCount?: number;
-  onFriendsCount?: (count: number) => void;
+  onOpenHistory?: () => void;
+  historyCount?: number;
+  onHistoryCount?: (count: number) => void;
 };
 
-export default function AuthButton({ onOpenFriends, friendsCount, onFriendsCount }: Props) {
+export default function AuthButton({ onOpenHistory, historyCount, onHistoryCount }: Props) {
   const { user, loading, openAuthModal, logout } = useAuth();
 
-  // 用户从 null → 已登录时拉一次朋友数(刷新页面后角标也能立刻显示)。
+  // 登录用户:拉服务端对话数;匿名:读本地(localStorage)对话数。
+  // 列表内的增删通过 onHistoryCount 回传,这里只负责初始/登录态切换时刷一次。
   useEffect(() => {
-    if (!user || !onFriendsCount) return;
+    if (loading || !onHistoryCount) return;
     let cancelled = false;
-    fetch('/api/friends')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!cancelled && d?.friends) onFriendsCount(d.friends.length);
+    (user
+      ? fetch('/api/conversations').then((r) => (r.ok ? r.json() : null))
+      : getStore(null).list(false)
+    )
+      .then((d: any) => {
+        if (cancelled) return;
+        const n = user ? (d?.conversations?.length ?? 0) : (d?.length ?? 0);
+        onHistoryCount(n);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [user, onFriendsCount]);
+  }, [user, loading, onHistoryCount]);
 
   if (loading) return null;
 
-  if (!user) {
-    return (
-      <button className="auth-trigger" onClick={() => openAuthModal()}>
-        登录 / 注册
-      </button>
-    );
-  }
-
   return (
     <div className="auth-logged">
-      {onOpenFriends && (
-        <button className="friends-trigger" onClick={onOpenFriends}>
-          朋友{typeof friendsCount === 'number' ? ` (${friendsCount})` : ''}
+      {onOpenHistory && (
+        <button className="friends-trigger" onClick={onOpenHistory}>
+          历史{typeof historyCount === 'number' ? ` (${historyCount})` : ''}
         </button>
       )}
-      <span className="auth-email" title={user.email}>{user.email}</span>
-      <button className="auth-logout" onClick={logout}>退出</button>
+      {user ? (
+        <>
+          <span className="auth-email" title={user.email}>{user.email}</span>
+          <button className="auth-logout" onClick={logout}>退出</button>
+        </>
+      ) : (
+        <button className="auth-trigger" onClick={() => openAuthModal()}>
+          登录 / 注册
+        </button>
+      )}
     </div>
   );
 }

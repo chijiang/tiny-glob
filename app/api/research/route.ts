@@ -103,6 +103,10 @@ export async function POST(req: NextRequest) {
           (text) => emit({ type: 'summary_chunk', text }),
         );
 
+        // 4.5 下发 grounding 事件,客户端据此持久化「可恢复」的对话记录
+        //     (匿名记录存 localStorage,续聊时仍需 events 做 grounding)
+        emit({ type: 'events', events });
+
         // 5. NPC 生成:character(非敏感)或 bystander(敏感,非亲历旁观者)
         const sessionId = crypto.randomUUID();
         let npc;

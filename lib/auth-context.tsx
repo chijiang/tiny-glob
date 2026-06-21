@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { uploadLocal } from './conversation-store';
 
 type AuthUser = { id: string; email: string };
 
@@ -59,6 +60,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error ?? '登录失败');
     setUser({ id: data.id, email: data.email });
+    // 登录后把本地(localStorage)对话上传合并到服务端(best-effort,不阻断登录)
+    void uploadLocal().catch(() => {});
   }, []);
 
   const register = useCallback(async (email: string, password: string) => {
@@ -70,6 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error ?? '注册失败');
     setUser({ id: data.id, email: data.email });
+    void uploadLocal().catch(() => {});
   }, []);
 
   const logout = useCallback(async () => {

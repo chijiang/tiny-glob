@@ -1,56 +1,49 @@
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String        @id @default(cuid())
+  email        String        @unique
   passwordHash String
-  createdAt    DateTime @default(now())
-  friends      Friend[]
+  createdAt    DateTime      @default(now())
+  conversations Conversation[]
 }
 
-model Friend {
+// 一段「对话」= 某地点+某时间的一次完整会话(含地区简介、NPC 快照、消息)。
+// 自动持久化:登录用户落 DB,匿名用户存浏览器 localStorage(登录时上传合并)。
+// 物理表名沿用 "Friend"(@@map)以避免重命名带来的数据迁移风险;代码侧统一用 Conversation。
+model Conversation {
   id              String   @id @default(cuid())
   userId          String
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // NPC 身份快照
-  name            String
-  age             Int
-  gender          String
-  occupation      String
-  family          String
-  personality     String
-  openingLine     String
-  // 续聊 grounding 上下文
-  mode            String // 'character' | 'bystander'
+  // 客户端生成的 UUID,用于 localStorage↔DB 上传去重(DB 记录为 null)
+  localId         String?  @unique
+  // NPC 快照;讲师模式(无角色)为 null。character/bystander 模式有值。
+  npc             Json?
+  mode            String // 'character' | 'bystander' | 'lecturer'
   placeName       String
   country         String
   year            Int
   month           Int
   userLang        String
+  // 研究阶段生成的地区简介;resume 时回填,避免「正在查阅资料…」
+  summary         String   @default("")
   sensitiveReason String?
-  events          Json // WikiEvent[]
+  events          Json // WikiEvent[](对话 grounding)
   lat             Float?
   lng             Float?
+  messages        Json // ChatMessage[](取代原 Message 关系表)
+  // ☆ 收藏标记(原「朋友」概念):单一列表上的筛选
+  favorite        Boolean  @default(false)
   createdAt       DateTime @default(now())
-  messages        Message[]
+  updatedAt       DateTime @updatedAt
 
   @@index([userId])
-}
-
-model Message {
-  id        String   @id @default(cuid())
-  friendId  String
-  friend    Friend   @relation(fields: [friendId], references: [id], onDelete: Cascade)
-  role      String // 'user' | 'assistant'
-  content   String
-  createdAt DateTime @default(now())
-
-  @@index([friendId])
+  @@map("Friend")
 }

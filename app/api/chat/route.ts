@@ -2,7 +2,6 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { appendMessage, getSession } from '@/lib/runtime-state';
 import { streamChat } from '@/lib/llm';
-import { persistFriendMessage } from '@/lib/friends';
 import { chatBystanderSystem, chatCharacterSystem, chatLecturerSystem } from '@/lib/prompts';
 
 export const runtime = 'nodejs';
@@ -24,8 +23,6 @@ export async function POST(req: NextRequest) {
   if (!session) return new Response('session not found', { status: 404 });
 
   appendMessage(input.sessionId, 'user', input.userMessage);
-  // 若此会话由恢复朋友而来,把用户消息也写回朋友的消息表
-  persistFriendMessage(session.friendId, 'user', input.userMessage);
 
   const system =
     session.mode === 'character' && session.npc
@@ -71,7 +68,6 @@ export async function POST(req: NextRequest) {
     },
     flush() {
       appendMessage(input.sessionId, 'assistant', assistantText);
-      persistFriendMessage(session.friendId, 'assistant', assistantText);
     },
   });
 

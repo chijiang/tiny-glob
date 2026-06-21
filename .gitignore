@@ -25,6 +25,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# prisma generated client
+/lib/generated/
+
 # deployment / server-specific(nginx 反代配置含本机 IP/域名,勿提交)
 nginx/
 

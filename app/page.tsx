@@ -8,9 +8,10 @@ import StatusOverlay from '@/components/StatusOverlay';
 import NpcPanel from '@/components/NpcPanel';
 import AuthButton from '@/components/AuthButton';
 import AuthModal from '@/components/AuthModal';
-import FriendsPanel, { FriendListItem } from '@/components/FriendsPanel';
+import ConversationsPanel, { ConversationListItem } from '@/components/ConversationsPanel';
 import { useAuth } from '@/lib/auth-context';
-import { ChatMessage, Npc, SessionMode, UserLang } from '@/lib/types';
+import { getStore } from '@/lib/conversation-store';
+import { ChatMessage, ConversationRecord, Npc, SessionMode, UserLang, WikiEvent } from '@/lib/types';
 
 type Phase = 'idle' | 'picking' | 'researching' | 'chatting';
 type Coords = { lat: number; lng: number };
@@ -19,7 +20,7 @@ type FlyTarget = Coords & { nonce: number };
 const USER_LANG: UserLang = 'zh'; // MVP 固定中文
 
 export default function Page() {
-  const { user, openAuthModal } = useAuth();
+  const { user } = useAuth();
 
   const [phase, setPhase] = useState<Phase>('idle');
   const [coords, setCoords] = useState<Coords | null>(null);
@@ -29,11 +30,16 @@ export default function Page() {
   const [placeName, setPlaceName] = useState('');
   const [country, setCountry] = useState('');
   const [summary, setSummary] = useState('');
+  const [events, setEvents] = useState<WikiEvent[]>([]);
+  const [year, setYear] = useState(0);
+  const [month, setMonth] = useState(0);
   const [sensitiveReason, setSensitiveReason] = useState<string | undefined>(undefined);
   const [modeOptions, setModeOptions] = useState<SessionMode[] | null>(null);
   const [currentMode, setCurrentMode] = useState<SessionMode>('character');
   const [npc, setNpc] = useState<Npc | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [favorite, setFavorite] = useState(false);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [assistantStreaming, setAssistantStreaming] = useState('');
@@ -42,16 +48,12 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [progressText, setProgressText] = useState('');
 
-  // 朋友面板 / 收藏
-  const [friendsPanelOpen, setFriendsPanelOpen] = useState(false);
-  const [friendsCount, setFriendsCount] = useState<number | undefined>(undefined);
-  const [savingFriend, setSavingFriend] = useState(false);
-  const [friendSaved, setFriendSaved] = useState(false); // 当前会话是否已收藏(防止重复)
-  const [resumeFriendId, setResumeFriendId] = useState<string | null>(null); // 当前会话来自哪位朋友
+  // 历史面板 / 计数角标
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyCount, setHistoryCount] = useState<number | undefined>(undefined);
 
-  // 列表加载/删除时回传最新数量;用 useCallback 保证 FriendsPanel.load 标识稳定。
-  const handleFriendsChanged = useCallback((count: number) => {
-    setFriendsCount(count);
+  const handleHistoryChanged = useCallback((count: number) => {
+    setHistoryCount(count);
   }, []);
 
   const handlePick = (c: Coords) => {
@@ -68,8 +70,13 @@ export default function Page() {
     setPlaceName('');
     setCountry('');
     setSummary('');
+    setEvents([]);
+    setYear(0);
+    setMonth(0);
     setNpc(null);
     setSessionId(null);
+    setConversationId(null);
+    setFavorite(false);
     setMessages([]);
     setAssistantStreaming('');
     setSensitiveReason(undefined);
@@ -77,29 +84,30 @@ export default function Page() {
     setCurrentMode('character');
     setError(null);
     setProgressText('');
-    setFriendSaved(false);
-    setResumeFriendId(null);
   };
 
-  async function startResearch(year: number, month: number) {
+  async function startResearch(y: number, m: number) {
     if (!coords) return;
     setPhase('researching');
+    setYear(y);
+    setMonth(m);
     setSummary('');
+    setEvents([]);
     setNpc(null);
+    setConversationId(null);
+    setFavorite(false);
     setSensitiveReason(undefined);
     setModeOptions(null);
     setCurrentMode('character');
     setMessages([]);
     setError(null);
     setProgressText('');
-    setFriendSaved(false);
-    setResumeFriendId(null);
 
     try {
       const res = await fetch('/api/research', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...coords, year, month, userLang: USER_LANG }),
+        body: JSON.stringify({ ...coords, year: y, month: m, userLang: USER_LANG }),
       });
       if (!res.ok || !res.body) throw new Error('查阅服务不可用');
 
@@ -132,6 +140,9 @@ export default function Page() {
               break;
             case 'summary_chunk':
               setSummary((s) => s + frame.text);
+              break;
+            case 'events':
+              setEvents(frame.events);
               break;
             case 'sensitive':
               if (frame.value && frame.reason) setSensitiveReason(frame.reason);
@@ -172,7 +183,51 @@ export default function Page() {
     if (!sessionId || chatBusy) return;
     setChatBusy(true);
     setAssistantStreaming('');
-    setMessages((m) => [...m, { role: 'user', content: text }]);
+
+    const userMsg: ChatMessage = { role: 'user', content: text };
+    setMessages((m) => [...m, userMsg]);
+
+    // 持久化:首条用户消息 → 创建对话记录(含地区简介/事件/NPC 快照);否则追加用户消息。
+    // best-effort,失败不阻断对话。
+    let cid = conversationId;
+    const openingLine = npc?.openingLine ?? '';
+    try {
+      if (!cid) {
+        const now = new Date().toISOString();
+        const rec: ConversationRecord = {
+          localId: crypto.randomUUID(),
+          npc,
+          mode: currentMode,
+          placeName,
+          country,
+          year,
+          month,
+          userLang: USER_LANG,
+          summary,
+          sensitiveReason,
+          lat: coords?.lat,
+          lng: coords?.lng,
+          events,
+          messages: [
+            ...(openingLine ? [{ role: 'assistant' as const, content: openingLine }] : []),
+            userMsg,
+          ],
+          favorite: false,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const created = await getStore(user).create(rec);
+        cid = created.id ?? null;
+        if (cid) {
+          setConversationId(cid);
+          setHistoryCount((c) => (typeof c === 'number' ? c + 1 : 1));
+        }
+      } else {
+        void getStore(user).appendMessage(cid, 'user', text);
+      }
+    } catch {
+      /* 持久化失败不影响对话 */
+    }
 
     try {
       const res = await fetch('/api/chat', {
@@ -193,6 +248,7 @@ export default function Page() {
       }
       if (acc.trim()) {
         setMessages((m) => [...m, { role: 'assistant', content: acc }]);
+        if (cid) void getStore(user).appendMessage(cid, 'assistant', acc);
       }
       setAssistantStreaming('');
     } catch (e: any) {
@@ -218,6 +274,10 @@ export default function Page() {
       setCurrentMode(data.mode);
       setNpc(data.npc ?? null);
       setMessages(data.messages ?? []);
+      // 模式切换会重置消息,同步到对话记录
+      if (conversationId) {
+        void getStore(user).updateMode(conversationId, data.mode, data.messages ?? []);
+      }
     } catch (e: any) {
       setError(e?.message ?? '切换出错');
     } finally {
@@ -225,65 +285,56 @@ export default function Page() {
     }
   }
 
-  // 收藏当前会话为朋友。未登录 → 打开登录弹窗,登录成功后自动重试。
-  async function saveFriend() {
-    if (!sessionId) return;
-    if (!user) {
-      openAuthModal(() => saveFriend());
-      return;
-    }
-    setSavingFriend(true);
-    setError(null);
+  // ☆ 收藏切换(匿名也能用,存本地)
+  async function toggleFavorite() {
+    if (!conversationId) return;
+    const next = !favorite;
+    setFavorite(next);
     try {
-      const res = await fetch('/api/friends', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ sessionId }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 409) {
-        setError('朋友数量已达上限(3 位),请先移除一些再收藏。');
-        return;
-      }
-      if (!res.ok) throw new Error(data?.error ?? '收藏失败');
-      setFriendSaved(true);
-      setResumeFriendId(data.friend?.id ?? null);
-      setFriendsCount((c) => (typeof c === 'number' ? c + 1 : c));
-    } catch (e: any) {
-      setError(e?.message ?? '收藏出错');
-    } finally {
-      setSavingFriend(false);
+      await getStore(user).toggleFavorite(conversationId);
+    } catch {
+      setFavorite(!next); // 回滚
     }
   }
 
-  // 从朋友列表恢复一段历史会话:地球飞行 + NPC + 历史 + 模式信息全部载入。
-  async function resumeFriend(f: FriendListItem) {
-    setFriendsPanelOpen(false);
+  // 从历史记录恢复一段对话:地球飞行 + 全字段回填(含地区简介) + 服务端重建会话。
+  async function resumeConversation(item: ConversationListItem) {
+    setHistoryOpen(false);
     setChatBusy(true);
     setError(null);
     setAssistantStreaming('');
-    setFriendSaved(true); // 已是朋友,无需重复收藏
-    setResumeFriendId(f.id);
     try {
-      const res = await fetch(`/api/friends/${f.id}/resume`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? '恢复朋友失败');
+      const full = await getStore(user).get(item.id);
+      if (!full) throw new Error('记录不存在或已删除');
 
-      const c: Coords = { lat: f.lat ?? 0, lng: f.lng ?? 0 };
+      const c: Coords = { lat: full.lat ?? 0, lng: full.lng ?? 0 };
       setMarker(c);
-      if (f.lat != null && f.lng != null) {
-        setFlyTo({ lat: f.lat, lng: f.lng, nonce: Date.now() });
+      if (full.lat != null && full.lng != null) {
+        setFlyTo({ lat: full.lat, lng: full.lng, nonce: Date.now() });
       }
-      setPlaceName(f.placeName);
-      setCountry(f.country);
-      setSummary('');
-      setNpc(data.npc ?? null);
-      setCurrentMode(data.mode ?? f.mode);
-      setMessages(data.messages ?? []);
-      setModeOptions(data.modeOptions ?? null);
-      setSensitiveReason(data.sensitiveReason);
-      setSessionId(data.sessionId);
+      setPlaceName(full.placeName);
+      setCountry(full.country);
+      setSummary(full.summary); // ← 修复:恢复地区简介,不再显示「正在查阅资料…」
+      setEvents(full.events);
+      setYear(full.year);
+      setMonth(full.month);
+      setNpc(full.npc);
+      setCurrentMode(full.mode);
+      setMessages(full.messages);
+      setModeOptions(full.mode === 'bystander' || full.mode === 'lecturer' ? ['bystander', 'lecturer'] : null);
+      setSensitiveReason(full.sensitiveReason);
+      setFavorite(full.favorite);
       setCoords(c);
+
+      const res = await fetch('/api/conversations/load', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(full),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? '恢复失败');
+      setSessionId(data.sessionId);
+      setConversationId(full.id ?? null);
       setPhase('chatting');
     } catch (e: any) {
       setError(e?.message ?? '恢复出错');
@@ -305,9 +356,9 @@ export default function Page() {
 
       <div className="auth-slot">
         <AuthButton
-          onOpenFriends={() => setFriendsPanelOpen(true)}
-          friendsCount={friendsCount}
-          onFriendsCount={handleFriendsChanged}
+          onOpenHistory={() => setHistoryOpen(true)}
+          historyCount={historyCount}
+          onHistoryCount={handleHistoryChanged}
         />
       </div>
 
@@ -335,22 +386,20 @@ export default function Page() {
           switchable={!!modeOptions}
           currentMode={currentMode}
           sensitiveReason={sensitiveReason}
+          favorite={favorite}
+          onToggleFavorite={toggleFavorite}
           brief={{ placeName, country, text: summary }}
           onSend={sendChat}
           onClose={reset}
           onSwitchMode={modeOptions ? handleSwitchMode : undefined}
-          canSaveFriend={!!user && !!npc}
-          onSaveFriend={saveFriend}
-          savingFriend={savingFriend}
-          friendSaved={friendSaved}
         />
       )}
 
-      <FriendsPanel
-        open={friendsPanelOpen}
-        onClose={() => setFriendsPanelOpen(false)}
-        onResume={resumeFriend}
-        onChanged={handleFriendsChanged}
+      <ConversationsPanel
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onResume={resumeConversation}
+        onChanged={handleHistoryChanged}
       />
 
       <AuthModal />
