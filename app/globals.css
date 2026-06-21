@@ -299,6 +299,11 @@ button.primary:hover:not(:disabled) {
   cursor: not-allowed;
 }
 
+/* 面板内历史简介:桌面端隐藏(左下 EventBrief 独立显示);手机端聊天时在此展示 */
+.npc-brief {
+  display: none;
+}
+
 .chat-log {
   flex: 1;
   overflow-y: auto;
@@ -753,10 +758,14 @@ button.primary:hover:not(:disabled) {
     right: 10px;
     bottom: auto;
     width: auto;
-    max-height: 110px;
+    max-height: 40vh;
     overflow-y: auto;
     padding: 10px 12px;
     border-radius: 12px;
+  }
+  /* 聊天阶段:简介已并入对话面板,顶部这份隐藏,把空间让给地球 */
+  .app[data-phase='chatting'] .event-brief {
+    display: none;
   }
   .event-brief .place {
     font-size: 11px;
@@ -791,6 +800,23 @@ button.primary:hover:not(:disabled) {
     font-size: 12px;
   }
 
+  /* 对话面板内的历史简介:聊天阶段在此展示(替代被隐藏的顶部那份) */
+  .npc-brief {
+    display: block;
+    max-height: 120px;
+    overflow-y: auto;
+    padding: 8px 14px 10px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .npc-brief .place {
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+  .npc-brief .summary {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
   /* 朋友面板:同样全宽底部抽屉 */
   .friends-panel {
     top: auto;
@@ -816,6 +842,13 @@ button.primary:hover:not(:disabled) {
   .chat-input {
     padding: 10px;
     gap: 6px;
+  }
+  /* iOS:表单 font-size < 16px 时聚焦会自动放大整页(发送按钮被挤出),
+     统一提到 16px 止住缩放,覆盖聊天/时间选择/登录全部表单。 */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
   }
   .chat-input input {
     padding: 8px 10px;

@@ -20,6 +20,8 @@ type Props = {
   onSaveFriend?: () => void;
   savingFriend?: boolean;
   friendSaved?: boolean;
+  /** 历史简介(手机端聊天时并入面板顶部展示;桌面端由左下 EventBrief 独立显示,CSS 隐藏此块) */
+  brief?: { placeName: string; country: string; text: string } | null;
 };
 
 export default function NpcPanel({
@@ -38,6 +40,7 @@ export default function NpcPanel({
   onSaveFriend,
   savingFriend,
   friendSaved,
+  brief,
 }: Props) {
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
@@ -106,6 +109,16 @@ export default function NpcPanel({
           </button>
         </div>
       </div>
+
+      {brief && (
+        <div className="npc-brief">
+          <div className="place">
+            {brief.placeName}
+            {brief.country ? `, ${brief.country}` : ''}
+          </div>
+          <div className="summary">{brief.text || '正在查阅资料…'}</div>
+        </div>
+      )}
 
       <div className="chat-log">
         {messages.map((m, i) => (

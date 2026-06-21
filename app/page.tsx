@@ -295,7 +295,7 @@ export default function Page() {
   const showBrief = phase === 'researching' || phase === 'chatting';
 
   return (
-    <main className="app">
+    <main className="app" data-phase={phase}>
       <GlobeView onPick={handlePick} marker={marker} flyTo={flyTo} />
 
       <div className="brand">
@@ -335,6 +335,7 @@ export default function Page() {
           switchable={!!modeOptions}
           currentMode={currentMode}
           sensitiveReason={sensitiveReason}
+          brief={{ placeName, country, text: summary }}
           onSend={sendChat}
           onClose={reset}
           onSwitchMode={modeOptions ? handleSwitchMode : undefined}
