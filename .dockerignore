@@ -1,0 +1,21 @@
+# 不要把本地产物/依赖/密钥打进镜像上下文
+node_modules
+.next
+out
+build
+.git
+
+# 环境变量由 compose 的 env_file 从宿主机注入,不烤进镜像
+.env
+.env.local
+.env.*.local
+
+*.log
+npm-debug.log*
+.DS_Store
+
+# Docker 自己
+Dockerfile
+.dockerignore
+docker-compose.yml
+README.md

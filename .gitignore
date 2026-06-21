@@ -24,3 +24,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# deployment / server-specific(nginx 反代配置含本机 IP/域名,勿提交)
+nginx/
+
+# claude code(会话本地状态,勿提交)
+.claude/
