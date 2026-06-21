@@ -24,6 +24,11 @@ export function getModel(): string {
   return process.env.LLM_MODEL || 'gpt-4o-mini';
 }
 
+// DeepSeek v4 系列默认开启思考模式:响应会带 reasoning_content,并额外消耗 reasoning_tokens。
+// 在此全局关闭。thinking 为 DeepSeek 的 OpenAI 兼容扩展字段;
+// 用展开注入以绕过 OpenAI SDK 对未声明字段的多余属性检查(excess property check)。
+const NO_THINKING = { thinking: { type: 'disabled' as const } };
+
 type BriefOpts = {
   placeName: string;
   country: string;
@@ -49,7 +54,8 @@ export async function generateNpc(opts: BriefOpts): Promise<Npc> {
   const { system, user } = generateNpcPrompt(opts);
   const res = await getClient().chat.completions.create({
     model: getModel(),
-    max_tokens: 300,
+    ...NO_THINKING,
+    max_tokens: 4096,
     temperature: 0.8,
     messages: withSystem(system, [{ role: 'user', content: user }]),
   });
@@ -63,7 +69,8 @@ export async function generateBystander(opts: BystanderOpts): Promise<Npc> {
   const { system, user } = generateBystanderPrompt(opts);
   const res = await getClient().chat.completions.create({
     model: getModel(),
-    max_tokens: 300,
+    ...NO_THINKING,
+    max_tokens: 4096,
     temperature: 0.8,
     messages: withSystem(system, [{ role: 'user', content: user }]),
   });
@@ -82,7 +89,8 @@ export async function judgeSensitivity(opts: {
   const { system, user } = judgeSensitivityPrompt(opts);
   const res = await getClient().chat.completions.create({
     model: getModel(),
-    max_tokens: 80,
+    ...NO_THINKING,
+    max_tokens: 2048,
     temperature: 0,
     messages: withSystem(system, [{ role: 'user', content: user }]),
   });
@@ -105,7 +113,8 @@ export async function streamChat(args: {
 }): Promise<ReadableStream<Uint8Array>> {
   const stream = await getClient().chat.completions.create({
     model: getModel(),
-    max_tokens: 600,
+    ...NO_THINKING,
+    max_tokens: 4096,
     temperature: 0.7,
     stream: true,
     messages: withSystem(args.system, args.messages),
