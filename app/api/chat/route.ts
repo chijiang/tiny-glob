@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { appendMessage, getSession } from '@/lib/runtime-state';
 import { streamChat } from '@/lib/llm';
 import { chatBystanderSystem, chatCharacterSystem, chatLecturerSystem } from '@/lib/prompts';
+import { MAX_GUEST_ROUNDS } from '@/lib/guest-policy';
 
 export const runtime = 'nodejs';
 
@@ -21,6 +22,19 @@ export async function POST(req: NextRequest) {
 
   const session = getSession(input.sessionId);
   if (!session) return new Response('session not found', { status: 404 });
+
+  // 访客每段对话限 N 轮。用 session.guestTurns 计数(模式切换不重置,防绕过)。
+  // 超限 → 403,前端回滚乐观消息并锁定本轮 / 引导注册。
+  if (session.guestId) {
+    const turns = session.guestTurns ?? 0;
+    if (turns >= MAX_GUEST_ROUNDS) {
+      return new Response(
+        JSON.stringify({ reason: 'guest_round_limit', error: `访客每段对话限 ${MAX_GUEST_ROUNDS} 轮,本轮已结束。` }),
+        { status: 403, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    session.guestTurns = turns + 1;
+  }
 
   appendMessage(input.sessionId, 'user', input.userMessage);
 

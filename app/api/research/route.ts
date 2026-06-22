@@ -1,10 +1,12 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { reverseGeocode } from '@/lib/nominatim';
 import { ruleBasedSensitive } from '@/lib/sensitivity';
 import { generateNpc, generateBystander, judgeSensitivity } from '@/lib/llm';
 import { runResearchAgent, streamAgentSummary } from '@/lib/agent';
 import { saveSession } from '@/lib/runtime-state';
+import { getUserFromRequest, resolveGuest, setGuestCookie } from '@/lib/auth';
+import { canStartConversation, conversationsRemaining, recordConversation } from '@/lib/guest-usage';
 import { ResearchFrame, SessionMode, SessionState } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -27,6 +29,23 @@ export async function POST(req: NextRequest) {
       status: 400,
       headers: { 'content-type': 'application/json' },
     });
+  }
+
+  // 鉴权:登录用户无限制;未登录按访客计(guestId 来自签名 cookie,首次自动签发)。
+  const user = await getUserFromRequest(req);
+  let guestId: string | undefined;
+  let guestCookieToken: string | null = null;
+  if (!user) {
+    const g = await resolveGuest(req);
+    guestId = g.guestId;
+    guestCookieToken = g.token;
+    // 访客只能开启有限段对话;超限 → 403,前端弹强制注册窗。
+    if (!canStartConversation(guestId)) {
+      return NextResponse.json(
+        { reason: 'guest_limit', error: '访客可体验的对话次数已用完,注册后即可继续无限制使用。' },
+        { status: 403 },
+      );
+    }
   }
 
   const encoder = new TextEncoder();
@@ -157,8 +176,15 @@ export async function POST(req: NextRequest) {
           lat: input.lat,
           lng: input.lng,
           messages: openingLine ? [{ role: 'assistant', content: openingLine }] : [],
+          ...(guestId ? { guestId, guestTurns: 0 } : {}),
         };
         saveSession(state);
+
+        // 访客:成功开启后记数,并下发剩余可开启对话数(前端据此决定用尽后是开新对话还是引导注册)。
+        if (guestId) {
+          recordConversation(guestId);
+          emit({ type: 'guestQuota', remaining: conversationsRemaining(guestId) });
+        }
 
         emit({ type: 'sessionId', id: sessionId });
         emit({ type: 'done' });
@@ -175,10 +201,13 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return new Response(stream, {
+  const res = new NextResponse(stream, {
     headers: {
       'content-type': 'application/x-ndjson; charset=utf-8',
       'cache-control': 'no-cache, no-transform',
     },
   });
+  // 首次访问的访客:写入身份 cookie(与流式 body 同一响应头发送)。
+  if (guestCookieToken) setGuestCookie(res, guestCookieToken);
+  return res;
 }

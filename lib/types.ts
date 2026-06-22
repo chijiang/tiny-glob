@@ -52,6 +52,10 @@ export type SessionState = {
   lat?: number; // 地球坐标(存对话/恢复时飞回用)
   lng?: number;
   messages: ChatMessage[]; // 对话历史(含开场白作为首条 assistant)
+  // 访客(未登录)会话才有:guestId 标识访客身份用于用量限制;
+  // guestTurns 累计该段对话用户发言轮数,模式切换不重置(防绕过 3 轮上限)。
+  guestId?: string;
+  guestTurns?: number;
 };
 
 export type ResearchRequest = {
@@ -72,6 +76,7 @@ export type ResearchFrame =
   | { type: 'events'; events: WikiEvent[] } // 下发 grounding 事件,客户端据此持久化可恢复记录
   | { type: 'sessionId'; id: string }
   | { type: 'progress'; text: string }
+  | { type: 'guestQuota'; remaining: number } // 访客:本次开启后还能开启的对话数
   | { type: 'error'; message: string }
   | { type: 'done' };
 

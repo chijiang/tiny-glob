@@ -48,9 +48,12 @@ export default function AuthButton({ onOpenHistory, historyCount, onHistoryCount
           <button className="auth-logout" onClick={logout}>退出</button>
         </>
       ) : (
-        <button className="auth-trigger" onClick={() => openAuthModal()}>
-          登录 / 注册
-        </button>
+        <>
+          <span className="auth-guest-tag" title="你正在以访客身份体验,用量受限">访客</span>
+          <button className="auth-trigger" onClick={() => openAuthModal()}>
+            登录 / 注册
+          </button>
+        </>
       )}
     </div>
   );

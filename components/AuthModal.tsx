@@ -2,16 +2,40 @@
 
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
+import { MAX_GUEST_CONVERSATIONS, MAX_GUEST_ROUNDS } from '@/lib/guest-policy';
+
+const FORCED_TEXT: Record<string, string> = {
+  guest_limit: `访客可体验的 ${MAX_GUEST_CONVERSATIONS} 段对话已用完,注册后即可无限制地继续探索。`,
+};
 
 export default function AuthModal() {
-  const { authModalOpen, login, register, closeAuthModal, consumePending } = useAuth();
+  const {
+    authModalOpen,
+    modalVariant,
+    forceAuthReason,
+    showGate,
+    login,
+    register,
+    closeAuthModal,
+    consumePending,
+    enterGuest,
+  } = useAuth();
+
+  const open = authModalOpen || showGate;
+  // authModalOpen 优先(action/forced);否则回落到访客门 gate。
+  const variant = authModalOpen ? modalVariant : 'gate';
+
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (!authModalOpen) return null;
+  if (!open) return null;
+
+  const isGate = variant === 'gate';
+  const isForced = variant === 'forced';
+  const canClose = !isForced; // forced 不可关闭
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,9 +54,30 @@ export default function AuthModal() {
     }
   };
 
+  const onBackdrop = () => {
+    if (!canClose) return;
+    closeAuthModal(); // gate 关闭=进入访客;action 关闭=直接关
+  };
+
   return (
-    <div className="modal-backdrop" onClick={closeAuthModal}>
+    <div className="modal-backdrop" onClick={onBackdrop}>
       <div className="modal auth-modal" onClick={(e) => e.stopPropagation()}>
+        {isGate && (
+          <div className="auth-banner auth-banner-gate">
+            <div className="auth-banner-title">欢迎来到 TinyGlob</div>
+            <div className="auth-banner-sub">
+              登录可保存进度、无限制对话;也可先以访客身份体验
+              <br />
+              (访客限 {MAX_GUEST_CONVERSATIONS} 段对话,每段 {MAX_GUEST_ROUNDS} 轮)。
+            </div>
+          </div>
+        )}
+        {isForced && (
+          <div className="auth-banner auth-banner-forced">
+            {(forceAuthReason && FORCED_TEXT[forceAuthReason]) || '注册或登录后即可继续。'}
+          </div>
+        )}
+
         <div className="modal-tabs">
           <button
             className={mode === 'login' ? 'active' : ''}
@@ -46,7 +91,7 @@ export default function AuthModal() {
           >
             注册
           </button>
-          <button className="modal-close" onClick={closeAuthModal} title="关闭">×</button>
+          {canClose && <button className="modal-close" onClick={closeAuthModal} title="关闭">×</button>}
         </div>
         <form onSubmit={submit} className="auth-form">
           <input
@@ -71,6 +116,12 @@ export default function AuthModal() {
             {busy ? '处理中…' : mode === 'login' ? '登录' : '注册并登录'}
           </button>
         </form>
+
+        {isGate && (
+          <button className="auth-guest-btn" onClick={enterGuest} disabled={busy}>
+            以访客身份继续
+          </button>
+        )}
       </div>
     </div>
   );

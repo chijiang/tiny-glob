@@ -6,6 +6,10 @@ import { prisma } from './prisma';
 const COOKIE_NAME = 'tinyglob_token';
 const MAX_AGE_SEC = 60 * 60 * 24 * 30; // 30 天
 
+// 访客身份 cookie(未登录用户)。签名 JWT,httpOnly 防篡改。
+const GUEST_COOKIE = 'tg_guest';
+const GUEST_MAX_AGE_SEC = 60 * 60 * 24 * 30; // 30 天
+
 function secretKey(): Uint8Array {
   const s = process.env.AUTH_SECRET;
   if (!s) throw new Error('AUTH_SECRET 未配置(请检查 .env)');
@@ -75,3 +79,49 @@ export async function getUserFromRequest(req: NextRequest) {
 }
 
 export { COOKIE_NAME };
+
+// ============ 访客身份 ============
+
+export async function signGuestToken(guestId: string): Promise<string> {
+  return new SignJWT({ guestId })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(`${GUEST_MAX_AGE_SEC}s`)
+    .sign(secretKey());
+}
+
+export async function verifyGuestToken(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, secretKey(), { algorithms: ['HS256'] });
+    return typeof payload.guestId === 'string' ? payload.guestId : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setGuestCookie(res: NextResponse, token: string): void {
+  res.cookies.set(GUEST_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: GUEST_MAX_AGE_SEC,
+  });
+}
+
+/**
+ * 解析或签发访客身份。未登录用户首次访问时签发新的 guestId,
+ * 并返回待写入 cookie 的 token;cookie 已存在且有效则复用(token=null 表示无需重写)。
+ */
+export async function resolveGuest(req: NextRequest): Promise<{ guestId: string; token: string | null }> {
+  const existing = req.cookies.get(GUEST_COOKIE)?.value;
+  if (existing) {
+    const guestId = await verifyGuestToken(existing);
+    if (guestId) return { guestId, token: null };
+  }
+  const guestId = crypto.randomUUID();
+  const token = await signGuestToken(guestId);
+  return { guestId, token };
+}
+
+export { GUEST_COOKIE };

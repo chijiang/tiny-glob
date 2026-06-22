@@ -20,6 +20,12 @@ type Props = {
   onToggleFavorite?: () => void;
   /** 历史简介(手机端聊天时并入面板顶部展示;桌面端由左下 EventBrief 独立显示,CSS 隐藏此块) */
   brief?: { placeName: string; country: string; text: string } | null;
+  /** 访客模式:展示轮数徽章;guestRoundMax 给出上限。 */
+  guest?: boolean;
+  guestRoundMax?: number;
+  guestRoundUsed?: number; // 权威已用轮数(页面维护,模式切换不重置);省略则按消息推算
+  /** 锁定提示条(如访客达轮数上限):展示时禁用输入并提供可选动作。 */
+  notice?: { text: string; actionLabel?: string; onAction?: () => void };
 };
 
 export default function NpcPanel({
@@ -37,9 +43,20 @@ export default function NpcPanel({
   favorite,
   onToggleFavorite,
   brief,
+  guest,
+  guestRoundMax,
+  guestRoundUsed,
+  notice,
 }: Props) {
   const [input, setInput] = useState('');
   const logRef = useRef<HTMLDivElement>(null);
+
+  // 访客已用轮数:优先用页面给的权威值(模式切换不重置);否则按消息推算。
+  const guestRounds =
+    guest && guestRoundMax
+      ? (guestRoundUsed ?? messages.filter((m) => m.role === 'user').length)
+      : 0;
+  const inputDisabled = busy || !!notice;
 
   // 新消息到达时把对话区滚到底部。
   // 注意:只能滚动 .chat-log 自身,绝不能用 scrollIntoView —— 它会顺带滚动
@@ -52,7 +69,7 @@ export default function NpcPanel({
 
   const send = () => {
     const t = input.trim();
-    if (!t || busy) return;
+    if (!t || inputDisabled) return;
     onSend(t);
     setInput('');
   };
@@ -133,18 +150,34 @@ export default function NpcPanel({
       </div>
 
       <div className="chat-input">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') send();
-          }}
-          placeholder={npc ? `对 ${npc.name} 说点什么…` : '提个问题…'}
-          disabled={busy}
-        />
-        <button onClick={send} disabled={busy || !input.trim()}>
-          发送
-        </button>
+        {notice ? (
+          <div className="chat-notice">
+            <span className="chat-notice-text">{notice.text}</span>
+            {notice.actionLabel && notice.onAction && (
+              <button className="chat-notice-action" onClick={notice.onAction}>
+                {notice.actionLabel}
+              </button>
+            )}
+          </div>
+        ) : guest && guestRoundMax ? (
+          <div className="guest-meter">
+            访客模式 · 第 {Math.min(guestRounds + (busy ? 1 : 0), guestRoundMax)} / {guestRoundMax} 轮
+          </div>
+        ) : null}
+        <div className="chat-input-row">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') send();
+            }}
+            placeholder={npc ? `对 ${npc.name} 说点什么…` : '提个问题…'}
+            disabled={inputDisabled}
+          />
+          <button onClick={send} disabled={inputDisabled || !input.trim()}>
+            发送
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import GlobeView from '@/components/GlobeView';
 import TimePicker from '@/components/TimePicker';
 import EventBrief from '@/components/EventBrief';
@@ -11,6 +11,7 @@ import AuthModal from '@/components/AuthModal';
 import ConversationsPanel, { ConversationListItem } from '@/components/ConversationsPanel';
 import { useAuth } from '@/lib/auth-context';
 import { getStore } from '@/lib/conversation-store';
+import { MAX_GUEST_ROUNDS, countRounds } from '@/lib/guest-policy';
 import { ChatMessage, ConversationRecord, Npc, SessionMode, UserLang, WikiEvent } from '@/lib/types';
 
 type Phase = 'idle' | 'picking' | 'researching' | 'chatting';
@@ -20,7 +21,7 @@ type FlyTarget = Coords & { nonce: number };
 const USER_LANG: UserLang = 'zh'; // MVP 固定中文
 
 export default function Page() {
-  const { user } = useAuth();
+  const { user, forceAuth } = useAuth();
 
   const [phase, setPhase] = useState<Phase>('idle');
   const [coords, setCoords] = useState<Coords | null>(null);
@@ -52,6 +53,11 @@ export default function Page() {
   // 历史面板 / 计数角标
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyCount, setHistoryCount] = useState<number | undefined>(undefined);
+
+  // 访客配额:本次开启后还能开启的对话数(research 下发);null=未知/非访客。
+  const [guestRemaining, setGuestRemaining] = useState<number | null>(null);
+  // 访客本段对话已用轮数(权威,模式切换不重置;与服务端 session.guestTurns 对齐)。
+  const [guestTurnsUsed, setGuestTurnsUsed] = useState(0);
 
   const handleHistoryChanged = useCallback((count: number) => {
     setHistoryCount(count);
@@ -86,6 +92,8 @@ export default function Page() {
     setCurrentMode('character');
     setError(null);
     setProgressText('');
+    setGuestRemaining(null);
+    setGuestTurnsUsed(0);
   };
 
   async function startResearch(y: number, m: number, interestArg?: string) {
@@ -105,6 +113,8 @@ export default function Page() {
     setMessages([]);
     setError(null);
     setProgressText('');
+    setGuestRemaining(null);
+    setGuestTurnsUsed(0);
 
     try {
       const res = await fetch('/api/research', {
@@ -112,6 +122,15 @@ export default function Page() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ...coords, year: y, month: m, userLang: USER_LANG, interest: interestArg }),
       });
+      // 访客对话次数用尽:服务端返回 403 → 弹强制注册窗,停留在选点阶段。
+      if (res.status === 403) {
+        const data = await res.json().catch(() => ({} as any));
+        if (data?.reason === 'guest_limit') {
+          forceAuth('guest_limit');
+          setPhase('picking');
+          return;
+        }
+      }
       if (!res.ok || !res.body) throw new Error('查阅服务不可用');
 
       const reader = res.body.getReader();
@@ -164,6 +183,9 @@ export default function Page() {
               break;
             case 'sessionId':
               setSessionId(frame.id);
+              break;
+            case 'guestQuota':
+              setGuestRemaining(frame.remaining);
               break;
             case 'error':
               setError(frame.message);
@@ -239,6 +261,16 @@ export default function Page() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ sessionId, userMessage: text }),
       });
+      // 访客达轮数上限:回滚乐观消息并锁定本轮(权威计数顶到上限,触发锁定提示)。
+      if (res.status === 403) {
+        const data = await res.json().catch(() => ({} as any));
+        if (data?.reason === 'guest_round_limit') {
+          setMessages((m) => m.slice(0, -1)); // 去掉刚加的用户消息
+          setAssistantStreaming('');
+          setGuestTurnsUsed(MAX_GUEST_ROUNDS);
+          return;
+        }
+      }
       if (!res.ok || !res.body) throw new Error('对话服务不可用');
 
       const reader = res.body.getReader();
@@ -255,6 +287,8 @@ export default function Page() {
         if (cid) void getStore(user).appendMessage(cid, 'assistant', acc);
       }
       setAssistantStreaming('');
+      // 一轮完成(用户已发言 + 收到回复):访客权威轮数 +1。
+      if (!user) setGuestTurnsUsed((n) => n + 1);
     } catch (e: any) {
       setError(e?.message ?? '对话出错');
     } finally {
@@ -330,6 +364,8 @@ export default function Page() {
       setSensitiveReason(full.sensitiveReason);
       setFavorite(full.favorite);
       setCoords(c);
+      // 访客恢复:按历史 user 消息重建已用轮数(与服务端 session.guestTurns 一致)。
+      setGuestTurnsUsed(user ? 0 : countRounds(full.messages));
 
       const res = await fetch('/api/conversations/load', {
         method: 'POST',
@@ -349,6 +385,27 @@ export default function Page() {
   }
 
   const showBrief = phase === 'researching' || phase === 'chatting';
+
+  // 访客在聊天阶段的轮数锁定:达上限 → 给出提示。若仍有可开启的对话 → 引导开新对话;
+  // 否则(配额也已用尽)→ 引导注册。
+  const isGuest = !user;
+  const guestRoundLocked = isGuest && phase === 'chatting' && guestTurnsUsed >= MAX_GUEST_ROUNDS;
+  const guestCanStartMore = typeof guestRemaining === 'number' ? guestRemaining > 0 : true;
+  const guestNotice = guestRoundLocked
+    ? guestCanStartMore
+      ? { text: `访客每段对话限 ${MAX_GUEST_ROUNDS} 轮,本轮已结束。`, actionLabel: '开启新对话', onAction: reset }
+      : { text: '访客可体验的对话次数已用完。', actionLabel: '注册解锁', onAction: () => forceAuth('guest_limit') }
+    : undefined;
+
+  // guest→user 过渡(访客在对话中注册/登录):当前会话建立在访客身份上,
+  // 登录后应回到地球以登录身份重新开始(避免沿用受限量配的旧会话)。
+  const prevUserRef = useRef(user);
+  useEffect(() => {
+    if (!prevUserRef.current && user && phase === 'chatting') {
+      reset();
+    }
+    prevUserRef.current = user;
+  }, [user, phase]);
 
   return (
     <main className="app" data-phase={phase}>
@@ -397,6 +454,10 @@ export default function Page() {
           onSend={sendChat}
           onClose={reset}
           onSwitchMode={modeOptions ? handleSwitchMode : undefined}
+          guest={isGuest}
+          guestRoundMax={isGuest ? MAX_GUEST_ROUNDS : undefined}
+          guestRoundUsed={isGuest ? guestTurnsUsed : undefined}
+          notice={guestNotice}
         />
       )}
 
