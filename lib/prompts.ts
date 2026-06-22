@@ -20,8 +20,10 @@ export function researchBriefPrompt(opts: {
   month: number;
   events: WikiEvent[];
   userLang: UserLang;
+  interest?: string;
 }): { system: string; user: string } {
   const ln = langName(opts.userLang);
+  const interest = opts.interest?.trim();
   const candidates = opts.events.length
     ? opts.events
         .map((e, i) => `${i + 1}. 《${e.title}》 — ${e.extract.slice(0, 500)}`)
@@ -33,11 +35,12 @@ export function researchBriefPrompt(opts: {
     user:
       `用户在 ${opts.placeName}(${opts.country})选择了 ${opts.year}年${opts.month}月(约 ${monthNameEn(opts.month)} ${opts.year})。\n\n` +
       `【候选条目】\n${candidates}\n\n` +
+      (interest ? `【用户兴趣】用户对「${interest}」特别感兴趣——若候选条目中有相关内容,请优先/侧重呈现。\n\n` : '') +
       `【任务】\n` +
       `1. 从候选中筛出与"${opts.year}年${opts.month}月前后约半年"在"${opts.placeName}附近"真实发生的事件。\n` +
       `2. 有匹配:用${ln}写 2-4 句客观简述,可点名引用具体条目,不要渲染煽情。\n` +
-      `3. 无匹配:本应用以教育与娱乐为主,趣味性优先。先简短说明"${opts.placeName}在这段时期没有被 Wikipedia 重点记录的重大事件",然后立即转入有趣的时代小科普(共 3-5 句)。基于你对"${opts.year}年前后 ${opts.country}/${opts.placeName}"的了解,描绘当时当地的日常生活与风土人情——可从衣着服饰、饮食、交通方式、民居建筑、社会阶层、常见职业、节庆习俗、当地地理气候、技术水平等角度中任选两三个,语气轻松、有画面感,像在讲一个时代小故事。\n` +
-      `   【红线】严禁编造具体的重大历史事件、战役、政变、条约、名人生卒(这些必须有 Wikipedia 出处);但基于通史常识描绘一个时代/地区的整体风貌是允许且鼓励的。\n` +
+      `3. 无匹配:本应用以教育与娱乐为主,趣味性优先。先简短说明"${opts.placeName}在这段时期没有被 Wikipedia 重点记录的重大事件",然后立即转入有趣的时代小科普(共 3-5 句)。基于你对"${opts.year}年前后 ${opts.country}/${opts.placeName}"的了解,描绘当时当地的日常生活与风土人情——可从衣着服饰、饮食、交通方式、民居建筑、社会阶层、常见职业、节庆习俗、当地地理气候、技术水平${interest ? `、与「${interest}」相关的时代风貌(如当时该领域的状况)` : ''}等角度中任选两三个,语气轻松、有画面感,像在讲一个时代小故事。\n` +
+      `   【红线】严禁编造具体的重大历史事件、战役、政变、条约、名人生卒(这些必须有 Wikipedia 出处);但基于通史常识描绘一个时代/地区的整体风貌(含某领域的一般状况)是允许且鼓励的。\n` +
       `输出语言:${ln}。`,
   };
 }
@@ -50,8 +53,10 @@ export function generateNpcPrompt(opts: {
   month: number;
   events: WikiEvent[];
   userLang: UserLang;
+  interest?: string;
 }): { system: string; user: string } {
   const ln = langName(opts.userLang);
+  const interest = opts.interest?.trim();
   const bg = opts.events.length
     ? opts.events
         .slice(0, 8)
@@ -65,6 +70,9 @@ export function generateNpcPrompt(opts: {
       `可参考的真实时代背景:\n${bg}\n\n` +
       `要求:\n` +
       `- 普通人身份(农民/小店主/教师/工人/学生/手艺人等),不要王侯将相或历史名人。\n` +
+      (interest
+        ? `- 用户对「${interest}」感兴趣:请让这位普通人的职业/身份与该领域相关(如绘画→美术学生/学徒画师/画廊学徒;法律→法学学生/书记员/小律师;文学→文学青年/印刷厂学徒/报社校对;音乐→学徒乐手;建筑→学徒/制图员),但仍须是那个时代当地的普通人(非名家、非历史名人),符合当地命名与时代背景。\n`
+        : '') +
       `- 年龄 18-65。\n` +
       `- 姓名符合当地命名习惯。\n` +
       `- openingLine 用第一人称、${ln},20-40 字,自然、有时代感。\n` +
@@ -83,8 +91,10 @@ export function chatCharacterSystem(opts: {
   month: number;
   events: WikiEvent[];
   userLang: UserLang;
+  interest?: string;
 }): string {
   const ln = langName(opts.userLang);
+  const interest = opts.interest?.trim();
   const eventsBrief = opts.events
     .slice(0, 6)
     .map((e) => `- 《${e.title}》: ${e.extract.slice(0, 150)}`)
@@ -94,6 +104,7 @@ export function chatCharacterSystem(opts: {
     `你生活在 ${opts.placeName}(${opts.country}),当前对话时间设定为 ${opts.year}年${opts.month}月。\n` +
     `你只能以这位普通人的第一人称视角说话,使用${ln}。\n` +
     `你知晓当时当地的日常(衣食住行、社会氛围),可参考以下真实背景:\n${eventsBrief}\n\n` +
+    (interest ? `你对「${interest}」领域有热情,聊天中可自然带出当时该领域的见闻与感受。\n\n` : '') +
     `【硬约束】\n` +
     `- 不要自称参与或目击了你不可能在场的重大历史事件现场。\n` +
     `- 不要跳出时代(不引用你那个年代之后的概念、科技、流行文化)。\n` +
@@ -112,8 +123,10 @@ export function chatLecturerSystem(opts: {
   reason?: string;
   events: WikiEvent[];
   userLang: UserLang;
+  interest?: string;
 }): string {
   const ln = langName(opts.userLang);
+  const interest = opts.interest?.trim();
   const eventsBrief = opts.events
     .slice(0, 8)
     .map((e) => `- 《${e.title}》: ${e.extract.slice(0, 200)}`)
@@ -122,6 +135,7 @@ export function chatLecturerSystem(opts: {
     `你是"历史讲解员"。因为该地点/时间涉及${opts.reason ?? '敏感'}事件,本会话不扮演当事人。\n` +
     `你以客观、克制、尊重受害者的口吻,使用${ln}回答用户关于 ${opts.placeName}(${opts.country}) ${opts.year}年${opts.month}月 的历史问题。\n` +
     `可参考的真实事件:\n${eventsBrief}\n\n` +
+    (interest ? `用户对「${interest}」感兴趣,在相关问题上可适当侧重该领域作答。\n\n` : '') +
     `【要求】\n` +
     `- 所有史实必须基于提供的真实事件,不渲染、不煽情、不轻描淡写。\n` +
     `- 用户若要求扮演当事人,礼貌拒绝并说明原因(出于对受害者的尊重)。\n` +
@@ -139,8 +153,10 @@ export function chatBystanderSystem(opts: {
   reason?: string;
   events: WikiEvent[];
   userLang: UserLang;
+  interest?: string;
 }): string {
   const ln = langName(opts.userLang);
+  const interest = opts.interest?.trim();
   const eventsBrief = opts.events
     .slice(0, 6)
     .map((e) => `- 《${e.title}》: ${e.extract.slice(0, 150)}`)
@@ -148,6 +164,7 @@ export function chatBystanderSystem(opts: {
   return (
     `你正在扮演 ${opts.npc.name},${opts.npc.age}岁,${opts.npc.gender},职业是${opts.npc.occupation},${opts.npc.family},性格${opts.npc.personality}。\n` +
     `你生活在 ${opts.placeName}(${opts.country})的同一时代与大致地区,当前对话时间设定为 ${opts.year}年${opts.month}月。使用${ln}。\n\n` +
+    (interest ? `你对「${interest}」领域有热情,聊天中可自然带出当时该领域的见闻。\n\n` : '') +
     `【关键设定:你是非亲历的旁观者】\n` +
     `- 你并没有亲身处于"${opts.reason ?? '那场敏感事件'}"的现场。事发时你在较远的城镇、乡村或另一个街区。\n` +
     `- 你是通过收音机/报纸/邻里传言/后来看到的难民或伤员/社会氛围的变化,零碎了解到远方出了大事。\n` +
@@ -174,8 +191,10 @@ export function generateBystanderPrompt(opts: {
   reason?: string;
   events: WikiEvent[];
   userLang: UserLang;
+  interest?: string;
 }): { system: string; user: string } {
   const ln = langName(opts.userLang);
+  const interest = opts.interest?.trim();
   const bg = opts.events.length
     ? opts.events
         .slice(0, 8)
@@ -190,6 +209,9 @@ export function generateBystanderPrompt(opts: {
       `可参考的真实时代背景:\n${bg}\n\n` +
       `要求:\n` +
       `- 普通人身份(农民/小店主/教师/工人/学生/手艺人等),年龄 18-65,姓名符合当地命名习惯。\n` +
+      (interest
+        ? `- 用户对「${interest}」感兴趣:可让 ta 的职业贴合该领域(如美术学生/法学学生/文学青年/学徒画师等),但仍须是普通人,且因居所/身份而不在事件现场。\n`
+        : '') +
       `- 关键:ta 的居所/职业决定了 ta 不在事件现场。例如事件发生在 ${opts.placeName},就让 ta 住在同国的另一座城镇或乡村;或事件在市中心,ta 在远郊。在 family 或 occupation 里暗示这一点。\n` +
       `- openingLine 用第一人称、${ln},20-40 字。体现一个"隐约听说远方出了大事"的普通人的日常与隐隐不安,不要直接复述事件本身。\n` +
       `- 严禁设定为事件的直接受害者、加害者、目击者或救援者。\n\n` +
@@ -224,7 +246,11 @@ export function agentSystemPrompt(opts: {
   country: string;
   year: number;
   month: number;
+  interest?: string;
 }): string {
+  const interestBlock = opts.interest?.trim()
+    ? `\n\nUSER INTEREST: The reader is especially interested in "${opts.interest.trim()}" (a domain such as painting / sculpture / literature / law / music / architecture — translate to English for the search if helpful). IN ADDITION to the strategy above, run ONE more wiki_search that combines that domain with the place OR country and the year (e.g. "<domain> ${opts.placeName} ${opts.year}" or "<domain> ${opts.country} ${opts.year}"), so we can ground domain-relevant context about ordinary life at that time. Only trust real results — if nothing relevant is found, say so honestly; never fabricate. Keep the total number of tool calls reasonable.`
+    : '';
   return (
     `You are a historical research agent for TinyGlob. Your job: collect real Wikipedia evidence about what was happening in and around a specific place at a specific time, so a downstream character can be grounded in real history.\n\n` +
     `TARGET: ${opts.placeName} (${opts.country}), around ${monthNameEn(opts.month)} ${opts.year}.\n\n` +
@@ -239,8 +265,9 @@ export function agentSystemPrompt(opts: {
     `4. Call wiki_search with the COUNTRY name + year (e.g. "${opts.country} ${opts.year}") — national-level events ABSOLUTELY affect ordinary local people, even if they happened hundreds of km away. This is critical.\n` +
     `5. If a result looks highly relevant, call wiki_get_page to read its full text before deciding.\n` +
     `6. You MAY search for events in the MONTHS OR FEW YEARS BEFORE the target date — recent major events shape the lives of people at the target moment. E.g. for Nov 1949, search "${opts.country} ${opts.year}" to catch events from earlier that year.\n` +
-    `7. Stop after ~4-6 tool calls. You do not need to find everything.\n\n` +
-    `You are NOT writing the final summary — another step does that. Your job is ONLY to collect evidence via tools. When done, reply with a brief note (1-2 sentences) of what you found.`
+    `7. Stop after ~4-6 tool calls. You do not need to find everything.` +
+    interestBlock +
+    `\n\nYou are NOT writing the final summary — another step does that. Your job is ONLY to collect evidence via tools. When done, reply with a brief note (1-2 sentences) of what you found.`
   );
 }
 
@@ -250,10 +277,15 @@ export function agentUserMessage(opts: {
   lng: number;
   year: number;
   month: number;
+  interest?: string;
 }): string {
+  const interestHint = opts.interest?.trim()
+    ? ` The reader is especially interested in "${opts.interest.trim()}"; remember to also gather domain-relevant evidence per the strategy.`
+    : '';
   return (
     `Coordinates: lat ${opts.lat.toFixed(4)}, lng ${opts.lng.toFixed(4)}. ` +
-    `Target time: ${monthNameEn(opts.month)} ${opts.year}. ` +
-    `Start by calling geocode_info, then gather evidence per the strategy. Stop when you have enough.`
+    `Target time: ${monthNameEn(opts.month)} ${opts.year}.` +
+    interestHint +
+    ` Start by calling geocode_info, then gather evidence per the strategy. Stop when you have enough.`
   );
 }

@@ -40,6 +40,7 @@ export default function Page() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [favorite, setFavorite] = useState(false);
+  const [interest, setInterest] = useState('');
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [assistantStreaming, setAssistantStreaming] = useState('');
@@ -77,6 +78,7 @@ export default function Page() {
     setSessionId(null);
     setConversationId(null);
     setFavorite(false);
+    setInterest('');
     setMessages([]);
     setAssistantStreaming('');
     setSensitiveReason(undefined);
@@ -86,11 +88,12 @@ export default function Page() {
     setProgressText('');
   };
 
-  async function startResearch(y: number, m: number) {
+  async function startResearch(y: number, m: number, interestArg?: string) {
     if (!coords) return;
     setPhase('researching');
     setYear(y);
     setMonth(m);
+    setInterest(interestArg ?? '');
     setSummary('');
     setEvents([]);
     setNpc(null);
@@ -107,7 +110,7 @@ export default function Page() {
       const res = await fetch('/api/research', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...coords, year: y, month: m, userLang: USER_LANG }),
+        body: JSON.stringify({ ...coords, year: y, month: m, userLang: USER_LANG, interest: interestArg }),
       });
       if (!res.ok || !res.body) throw new Error('查阅服务不可用');
 
@@ -205,6 +208,7 @@ export default function Page() {
           userLang: USER_LANG,
           summary,
           sensitiveReason,
+          interest: interest || undefined,
           lat: coords?.lat,
           lng: coords?.lng,
           events,
@@ -316,6 +320,7 @@ export default function Page() {
       setCountry(full.country);
       setSummary(full.summary); // ← 修复:恢复地区简介,不再显示「正在查阅资料…」
       setEvents(full.events);
+      setInterest(full.interest ?? '');
       setYear(full.year);
       setMonth(full.month);
       setNpc(full.npc);

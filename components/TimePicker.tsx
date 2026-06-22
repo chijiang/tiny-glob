@@ -5,7 +5,7 @@ import { useState } from 'react';
 type Props = {
   initialYear?: number;
   initialMonth?: number;
-  onConfirm: (year: number, month: number) => void;
+  onConfirm: (year: number, month: number, interest?: string) => void;
   onCancel: () => void;
 };
 
@@ -17,6 +17,7 @@ export default function TimePicker({
 }: Props) {
   const [year, setYear] = useState(initialYear);
   const [month, setMonth] = useState(initialMonth);
+  const [interest, setInterest] = useState('');
 
   const currentYear = new Date().getFullYear();
   const years: number[] = [];
@@ -42,9 +43,21 @@ export default function TimePicker({
           ))}
         </select>
       </div>
+      <div style={{ marginBottom: 14 }}>
+        <input
+          value={interest}
+          onChange={(e) => setInterest(e.target.value)}
+          placeholder="想从什么角度了解?(可选)如:绘画 / 雕刻 / 文学 / 法律 / 音乐 / 建筑"
+          maxLength={200}
+          style={{ width: '100%' }}
+        />
+        <div className="hint" style={{ marginTop: 6, fontSize: 11.5 }}>
+          填了兴趣,我们会尽量按它检索资料、并安排一位志趣相投的对话对象;不填则随机一位历史亲历者。
+        </div>
+      </div>
       <div className="row right">
         <button onClick={onCancel}>取消</button>
-        <button className="primary" onClick={() => onConfirm(year, month)}>
+        <button className="primary" onClick={() => onConfirm(year, month, interest.trim() || undefined)}>
           开始查阅
         </button>
       </div>

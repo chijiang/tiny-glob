@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
           month: session.month,
           events: session.events,
           userLang: session.userLang,
+          interest: session.interest,
         })
       : session.mode === 'bystander' && session.npc
         ? chatBystanderSystem({
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
             reason: session.sensitiveReason,
             events: session.events,
             userLang: session.userLang,
+            interest: session.interest,
           })
         : chatLecturerSystem({
             placeName: session.placeName,
@@ -54,6 +56,7 @@ export async function POST(req: NextRequest) {
             reason: session.sensitiveReason,
             events: session.events,
             userLang: session.userLang,
+            interest: session.interest,
           });
 
   const body = await streamChat({ system, messages: session.messages });

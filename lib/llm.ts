@@ -36,6 +36,7 @@ type BriefOpts = {
   month: number;
   events: WikiEvent[];
   userLang: UserLang;
+  interest?: string;
 };
 
 type BystanderOpts = BriefOpts & { reason?: string };

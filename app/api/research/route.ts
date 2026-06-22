@@ -15,6 +15,7 @@ const Body = z.object({
   year: z.number().int().min(1).max(2100),
   month: z.number().int().min(1).max(12),
   userLang: z.enum(['zh', 'en']),
+  interest: z.string().max(200).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -63,6 +64,7 @@ export async function POST(req: NextRequest) {
           year: input.year,
           month: input.month,
           userLang: input.userLang,
+          interest: input.interest,
           onProgress: (text) => emit({ type: 'progress', text }),
         });
         const events = agentResult.events;
@@ -99,6 +101,7 @@ export async function POST(req: NextRequest) {
             month: input.month,
             events,
             userLang: input.userLang,
+            interest: input.interest,
           },
           (text) => emit({ type: 'summary_chunk', text }),
         );
@@ -118,6 +121,7 @@ export async function POST(req: NextRequest) {
             month: input.month,
             events,
             userLang: input.userLang,
+            interest: input.interest,
           });
           emit({ type: 'npc', mode: 'character', npc });
         } else {
@@ -130,6 +134,7 @@ export async function POST(req: NextRequest) {
             events,
             reason,
             userLang: input.userLang,
+            interest: input.interest,
           });
           emit({ type: 'npc', mode: 'bystander', npc });
           emit({ type: 'modeOptions', options: ['bystander', 'lecturer'] });
@@ -148,6 +153,7 @@ export async function POST(req: NextRequest) {
           events,
           npc,
           sensitiveReason: reason,
+          interest: input.interest,
           lat: input.lat,
           lng: input.lng,
           messages: openingLine ? [{ role: 'assistant', content: openingLine }] : [],

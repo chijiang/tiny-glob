@@ -22,6 +22,7 @@ type AgentArgs = {
   year: number;
   month: number;
   userLang: UserLang;
+  interest?: string;
   onProgress?: (text: string) => Promise<void> | void;
 };
 
@@ -146,6 +147,18 @@ export async function runFallbackCollect(
       push({ pageid: page.pageid, title: page.title, extract: page.extract, categories: page.categories, url: page.url });
     }
   }
+
+  // 兴趣领域检索(best-effort:无 function-calling 降级路径,interest 多为中文,en.wiki 命中弱也无妨)
+  if (args.interest?.trim()) {
+    await args.onProgress?.(`正在检索与「${args.interest.trim()}」相关的内容…`);
+    const domain = await wikiSearch(`${args.interest.trim()} ${args.country} ${args.year}`).catch(() => ({
+      results: [],
+      totalhits: 0,
+    }));
+    domain.results.forEach((s) =>
+      push({ pageid: s.pageid, title: s.title, extract: s.snippet, categories: [], url: s.url }),
+    );
+  }
 }
 
 /**
@@ -160,6 +173,7 @@ export async function streamAgentSummary(
     month: number;
     events: WikiEvent[];
     userLang: UserLang;
+    interest?: string;
   },
   onChunk: (text: string) => Promise<void> | void,
 ): Promise<void> {

@@ -40,6 +40,7 @@ export async function POST(req: NextRequest) {
     userLang: rec.userLang,
     summary: rec.summary,
     sensitiveReason: rec.sensitiveReason ?? null,
+    interest: rec.interest ?? null,
     events: rec.events as unknown as Prisma.InputJsonValue,
     lat: rec.lat ?? null,
     lng: rec.lng ?? null,

@@ -32,6 +32,8 @@ model Conversation {
   year            Int
   month           Int
   userLang        String
+  // 用户在 TimePicker 填写的兴趣(可选);影响资料检索/简介侧重/NPC 人设
+  interest        String?
   // 研究阶段生成的地区简介;resume 时回填,避免「正在查阅资料…」
   summary         String   @default("")
   sensitiveReason String?

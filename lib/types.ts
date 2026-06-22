@@ -48,6 +48,7 @@ export type SessionState = {
   npc?: Npc; // character/bystander 模式下存在(旁观者 NPC 在切到 lecturer 时仍保留,以便切回)
   sensitiveReason?: string; // 敏感原因(bystander/lecturer 引用)
   summary?: string; // 地区简介(resume 时回填,UI 用;服务端系统提示词暂不引用)
+  interest?: string; // 用户填写的兴趣(影响检索/简介/NPC);空则走默认随机亲历者
   lat?: number; // 地球坐标(存对话/恢复时飞回用)
   lng?: number;
   messages: ChatMessage[]; // 对话历史(含开场白作为首条 assistant)
@@ -105,6 +106,7 @@ export type ConversationRecord = {
   userLang: UserLang;
   summary: string;
   sensitiveReason?: string;
+  interest?: string;
   lat?: number;
   lng?: number;
   events: WikiEvent[];
