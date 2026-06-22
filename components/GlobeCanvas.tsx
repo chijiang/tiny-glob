@@ -15,8 +15,8 @@ type Props = {
   flyTo?: FlyTarget | null;
 };
 
-// 用 jsdelivr 的纹理(plan 验证过 unpkg 有问题)
-const GLOBE_IMAGE = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg';
+// NASA Black Marble 夜景图:本地化后的 8K 纹理(由官方 3km 版缩放得到)
+const GLOBE_IMAGE = '/textures/earth-night-black-marble-8k.jpg';
 const BUMP_IMAGE = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png';
 
 type CityLabel = {
