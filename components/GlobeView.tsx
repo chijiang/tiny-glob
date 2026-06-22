@@ -26,12 +26,14 @@ const GlobeCanvas = dynamic(() => import('./GlobeCanvas'), {
 
 type Coords = { lat: number; lng: number };
 type FlyTarget = Coords & { nonce: number };
+type GlobeTheme = 'day' | 'night';
 
 type Props = {
   onPick: (coords: Coords) => void;
   marker?: Coords | null;
   /** 设置后地球平滑飞到该坐标;nonce 变化触发重新飞行 */
   flyTo?: FlyTarget | null;
+  theme: GlobeTheme;
 };
 
 export default function GlobeView(props: Props) {

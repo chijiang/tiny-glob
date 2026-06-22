@@ -17,8 +17,10 @@ import { ChatMessage, ConversationRecord, Npc, SessionMode, UserLang, WikiEvent 
 type Phase = 'idle' | 'picking' | 'researching' | 'chatting';
 type Coords = { lat: number; lng: number };
 type FlyTarget = Coords & { nonce: number };
+type GlobeTheme = 'day' | 'night';
 
 const USER_LANG: UserLang = 'zh'; // MVP 固定中文
+const GLOBE_THEME_KEY = 'tg.globe-theme.v1';
 
 export default function Page() {
   const { user, forceAuth } = useAuth();
@@ -58,10 +60,28 @@ export default function Page() {
   const [guestRemaining, setGuestRemaining] = useState<number | null>(null);
   // 访客本段对话已用轮数(权威,模式切换不重置;与服务端 session.guestTurns 对齐)。
   const [guestTurnsUsed, setGuestTurnsUsed] = useState(0);
+  const [globeTheme, setGlobeTheme] = useState<GlobeTheme>('night');
 
   const handleHistoryChanged = useCallback((count: number) => {
     setHistoryCount(count);
   }, []);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(GLOBE_THEME_KEY);
+      if (saved === 'day' || saved === 'night') setGlobeTheme(saved);
+    } catch {
+      /* 读配置失败时回退默认夜间 */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(GLOBE_THEME_KEY, globeTheme);
+    } catch {
+      /* 持久化失败不影响使用 */
+    }
+  }, [globeTheme]);
 
   const handlePick = (c: Coords) => {
     if (phase === 'researching' || phase === 'chatting') return;
@@ -409,7 +429,7 @@ export default function Page() {
 
   return (
     <main className="app" data-phase={phase}>
-      <GlobeView onPick={handlePick} marker={marker} flyTo={flyTo} />
+      <GlobeView onPick={handlePick} marker={marker} flyTo={flyTo} theme={globeTheme} />
 
       <div className="brand">
         <span className="brand-dot" />
@@ -417,6 +437,22 @@ export default function Page() {
       </div>
 
       <div className="auth-slot">
+        <div className="globe-theme-switch" role="group" aria-label="地球纹理模式">
+          <button
+            className={globeTheme === 'day' ? 'active' : ''}
+            aria-pressed={globeTheme === 'day'}
+            onClick={() => setGlobeTheme('day')}
+          >
+            白天
+          </button>
+          <button
+            className={globeTheme === 'night' ? 'active' : ''}
+            aria-pressed={globeTheme === 'night'}
+            onClick={() => setGlobeTheme('night')}
+          >
+            夜间
+          </button>
+        </div>
         <AuthButton
           onOpenHistory={() => setHistoryOpen(true)}
           historyCount={historyCount}

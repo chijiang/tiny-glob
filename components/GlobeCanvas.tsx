@@ -7,16 +7,20 @@ import * as THREE from 'three';
 type Coords = { lat: number; lng: number };
 
 type FlyTarget = Coords & { nonce: number };
+type GlobeTheme = 'day' | 'night';
 
 type Props = {
   onPick: (coords: Coords) => void;
   marker?: Coords | null;
   /** 设置后地球会平滑飞到该坐标;nonce 变化触发重新飞行 */
   flyTo?: FlyTarget | null;
+  theme: GlobeTheme;
 };
 
-// NASA Black Marble 夜景图:本地化后的 8K 纹理(由官方 3km 版缩放得到)
-const GLOBE_IMAGE = '/textures/earth-night-black-marble-8k.jpg';
+const GLOBE_IMAGES: Record<GlobeTheme, string> = {
+  day: 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-blue-marble.jpg',
+  night: 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg',
+};
 const BUMP_IMAGE = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png';
 
 type CityLabel = {
@@ -70,7 +74,7 @@ function labelKey(c: { lat: number; lng: number; label: string }) {
   return `${c.label}@${c.lat.toFixed(2)},${c.lng.toFixed(2)}`;
 }
 
-export default function GlobeCanvas({ onPick, marker, flyTo }: Props) {
+export default function GlobeCanvas({ onPick, marker, flyTo, theme }: Props) {
   const [size, setSize] = useState({ width: 800, height: 800 });
   const [cities, setCities] = useState<CityLabel[]>([]);
   const [maxImportance, setMaxImportance] = useState<Tier>(0);
@@ -102,6 +106,14 @@ export default function GlobeCanvas({ onPick, marker, flyTo }: Props) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // 预取两套远程纹理,首次切换时更平滑。
+  useEffect(() => {
+    Object.values(GLOBE_IMAGES).forEach((src) => {
+      const img = new Image();
+      img.src = src;
+    });
   }, []);
 
   useEffect(() => {
@@ -266,7 +278,7 @@ export default function GlobeCanvas({ onPick, marker, flyTo }: Props) {
         width={size.width}
         height={size.height}
         backgroundColor="#000010"
-        globeImageUrl={GLOBE_IMAGE}
+        globeImageUrl={GLOBE_IMAGES[theme]}
         bumpImageUrl={BUMP_IMAGE}
         pointsData={points}
         pointLat="lat"
