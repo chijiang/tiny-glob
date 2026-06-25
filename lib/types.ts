@@ -27,6 +27,24 @@ export type Npc = {
   family: string;
   personality: string;
   openingLine: string; // 第一人称开场白
+  // 稀遇(隐藏)设定:命中稀遇原型时附上,前端亮徽章;普通 NPC 为 null/省略。
+  rarity?: { label: string; flavor: string } | null;
+};
+
+/**
+ * NPC 状态:8 个维度(1-10)+ 一句对玩家/本轮的内心看法。
+ * 维度含义见 lib/npc-state.ts 的 DIMENSIONS。每轮随对话变化,影响作答语气。
+ */
+export type NpcState = {
+  affinity: number; // 好感:1 厌烦 ↔ 10 亲密
+  trust: number; // 信任:1 戒备 ↔ 10 深信
+  respect: number; // 尊敬:1 轻视 ↔ 10 敬重
+  joy: number; // 情绪:1 悲伤 ↔ 10 喜悦
+  calm: number; // 松弛:1 紧张 ↔ 10 放松
+  vulnerability: number; // 袒露:1 防备 ↔ 10 敞开心扉
+  gratitude: number; // 感激:1 愤怒 ↔ 10 感恩(双极,中性≈5)
+  curiosity: number; // 好奇:1 冷淡 ↔ 10 好奇
+  perception: string; // ≤60 字内心看法
 };
 
 export type ChatMessage = {
@@ -52,6 +70,8 @@ export type SessionState = {
   lat?: number; // 地球坐标(存对话/恢复时飞回用)
   lng?: number;
   messages: ChatMessage[]; // 对话历史(含开场白作为首条 assistant)
+  // NPC 状态:每轮更新并注入下一轮系统提示词,影响作答语气。
+  state?: NpcState;
   // 访客(未登录)会话才有:guestId 标识访客身份用于用量限制;
   // guestTurns 累计该段对话用户发言轮数,模式切换不重置(防绕过 3 轮上限)。
   guestId?: string;
@@ -77,6 +97,8 @@ export type ResearchFrame =
   | { type: 'sessionId'; id: string }
   | { type: 'progress'; text: string }
   | { type: 'guestQuota'; remaining: number } // 访客:本次开启后还能开启的对话数
+  | { type: 'rare'; label: string; flavor: string } // 命中稀遇对象:前端亮徽章 + toast
+  | { type: 'npcState'; state: NpcState } // NPC 初始状态(research 一次性下发)
   | { type: 'error'; message: string }
   | { type: 'done' };
 
@@ -117,6 +139,7 @@ export type ConversationRecord = {
   events: WikiEvent[];
   messages: ChatMessage[];
   favorite: boolean;
+  state?: NpcState; // NPC 状态快照(每轮更新,resume 时恢复)
   createdAt: string;
   updatedAt: string;
 };

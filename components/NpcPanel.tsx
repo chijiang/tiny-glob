@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ChatMessage, Npc, SessionMode } from '@/lib/types';
+import { ChatMessage, Npc, NpcState, SessionMode } from '@/lib/types';
+import { DIMENSIONS, UNLOCK_AFFINITY, deriveMood } from '@/lib/npc-state';
 
 type Props = {
   npc: Npc | null; // null = 讲解员模式
@@ -26,6 +27,8 @@ type Props = {
   guestRoundUsed?: number; // 权威已用轮数(页面维护,模式切换不重置);省略则按消息推算
   /** 锁定提示条(如访客达轮数上限):展示时禁用输入并提供可选动作。 */
   notice?: { text: string; actionLabel?: string; onAction?: () => void };
+  /** NPC 当前状态(8 维)。仅 character/bystander 有;lecturer 无。 */
+  state?: NpcState | null;
 };
 
 export default function NpcPanel({
@@ -47,6 +50,7 @@ export default function NpcPanel({
   guestRoundMax,
   guestRoundUsed,
   notice,
+  state,
 }: Props) {
   const [input, setInput] = useState('');
   const logRef = useRef<HTMLDivElement>(null);
@@ -57,6 +61,19 @@ export default function NpcPanel({
       ? (guestRoundUsed ?? messages.filter((m) => m.role === 'user').length)
       : 0;
   const inputDisabled = busy || !!notice;
+
+  // ===== 状态面板派生 =====
+  // 仅在有 NPC 的角色/旁观者模式展示;讲解员无状态。
+  const showState = !!npc && !!state;
+  const mood = state ? deriveMood(state) : null;
+  const unlocked = !!state && state.affinity >= UNLOCK_AFFINITY;
+  // 事件型维度(calm/vulnerability/gratitude/curiosity):仅当极值(≤2 或 ≥9)时才给玩家"察觉到"的提示。
+  const extremeDims = showState && state
+    ? DIMENSIONS.filter((d) => d.tier === 'event' && (state[d.key] <= 2 || state[d.key] >= 9))
+    : [];
+  // 心声(perception):好感够高、或对方向你袒露时,才显示 ta 的内心看法。
+  const showPerception =
+    showState && state && state.perception && (unlocked || state.vulnerability >= 8);
 
   // 新消息到达时把对话区滚到底部。
   // 注意:只能滚动 .chat-log 自身,绝不能用 scrollIntoView —— 它会顺带滚动
@@ -81,7 +98,13 @@ export default function NpcPanel({
       <div className="npc-header">
         {npc ? (
           <>
-            <div className="npc-name">{npc.name}</div>
+            <div className="npc-name">
+              {npc.name}
+              {mood && <span className="npc-mood-emoji" title={`心情:${mood.label}`}>{mood.emoji}</span>}
+              {npc.rarity && (
+                <span className="rare-badge" title={npc.rarity.flavor}>✦ {npc.rarity.label}</span>
+              )}
+            </div>
             <div className="npc-meta">
               {npc.age}岁 · {npc.gender} · {npc.occupation}
             </div>
@@ -138,6 +161,39 @@ export default function NpcPanel({
         </div>
       )}
 
+      {showState && state && mood && (
+        <div className="npc-state">
+          <div className="npc-state-row">
+            <span className="npc-mood">{mood.emoji} {mood.label}</span>
+            <span className="npc-state-hint" title="与 ta 越亲近,越能读懂 ta">
+              {unlocked ? '已读懂 ta 几分' : '多聊聊,才能读懂 ta'}
+            </span>
+          </div>
+          <StateBar label="好感" value={state.affinity} />
+          {unlocked && <StateBar label="信任" value={state.trust} />}
+          {unlocked && <StateBar label="尊敬" value={state.respect} />}
+          {extremeDims.length > 0 && (
+            <div className="npc-state-chips">
+              {extremeDims.map((d) => {
+                const v = state[d.key];
+                const pole = v >= 9 ? d.high : d.low;
+                return (
+                  <span key={d.key} className="npc-state-chip">
+                    {d.label}·{pole}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          {showPerception && (
+            <div className="npc-perception">
+              <span className="npc-perception-label">心声</span>
+              {state.perception}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="chat-log" ref={logRef}>
         {messages.map((m, i) => (
           <div key={i} className={`bubble ${m.role}`}>
@@ -179,6 +235,20 @@ export default function NpcPanel({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** 1-10 数值的小进度条 + 标签。 */
+function StateBar({ label, value }: { label: string; value: number }) {
+  const pct = Math.max(0, Math.min(100, (value / 10) * 100));
+  return (
+    <div className="npc-state-bar">
+      <span className="npc-state-bar-label">{label}</span>
+      <span className="npc-state-bar-track">
+        <span className="npc-state-bar-fill" style={{ width: `${pct}%` }} />
+      </span>
+      <span className="npc-state-bar-value">{value}</span>
     </div>
   );
 }

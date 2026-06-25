@@ -16,11 +16,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   return NextResponse.json({ conversation: rowToRecord(row) });
 }
 
-// PATCH 三种操作:追加消息 / 切换收藏 / 切换模式(会重置 messages)
+// PATCH 四种操作:追加消息 / 切换收藏 / 切换模式(会重置 messages) / 更新 NPC 状态
 const PatchBody = z.discriminatedUnion('op', [
   z.object({ op: z.literal('appendMessage'), role: z.enum(['user', 'assistant']), content: z.string() }),
   z.object({ op: z.literal('toggleFavorite') }),
   z.object({ op: z.literal('updateMode'), mode: z.enum(['bystander', 'lecturer'] as const satisfies SessionMode[]), messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string() })) }),
+  z.object({ op: z.literal('updateState'), state: z.record(z.string(), z.any()) }),
 ]);
 
 async function ownOrFail(req: NextRequest, id: string) {
@@ -58,10 +59,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ favorite: updated.favorite });
   }
 
-  // updateMode:模式切换会重置消息,整体覆盖 messages
+  if (body.op === 'updateMode') {
+    // 模式切换会重置消息,整体覆盖 messages
+    await prisma.conversation.update({
+      where: { id: params.id },
+      data: { mode: body.mode, messages: body.messages as unknown as object },
+    });
+    return NextResponse.json({ ok: true });
+  }
+
+  // updateState:覆盖 NPC 状态快照
   await prisma.conversation.update({
     where: { id: params.id },
-    data: { mode: body.mode, messages: body.messages as unknown as object },
+    data: { state: body.state as unknown as object },
   });
   return NextResponse.json({ ok: true });
 }

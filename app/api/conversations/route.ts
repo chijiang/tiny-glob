@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
     lat: rec.lat ?? null,
     lng: rec.lng ?? null,
     messages: rec.messages as unknown as Prisma.InputJsonValue,
+    state: (rec.state as unknown as Prisma.InputJsonValue) ?? Prisma.JsonNull,
     favorite: rec.favorite,
   };
 

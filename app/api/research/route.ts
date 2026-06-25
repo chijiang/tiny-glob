@@ -7,6 +7,8 @@ import { runResearchAgent, streamAgentSummary } from '@/lib/agent';
 import { saveSession } from '@/lib/runtime-state';
 import { getUserFromRequest, resolveGuest, setGuestCookie } from '@/lib/auth';
 import { canStartConversation, conversationsRemaining, recordConversation } from '@/lib/guest-usage';
+import { rollNpcSeed } from '@/lib/npc-seed';
+import { applyOverride, defaultNpcState } from '@/lib/npc-state';
 import { ResearchFrame, SessionMode, SessionState } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -130,7 +132,9 @@ export async function POST(req: NextRequest) {
         emit({ type: 'events', events });
 
         // 5. NPC 生成:character(非敏感)或 bystander(敏感,非亲历旁观者)
+        //    先掷骰决定人口属性(性别/年龄/家庭/性格)+ 是否命中稀遇,作为硬约束注入提示词。
         const sessionId = crypto.randomUUID();
+        const seed = await rollNpcSeed();
         let npc;
         if (mode === 'character') {
           npc = await generateNpc({
@@ -141,8 +145,8 @@ export async function POST(req: NextRequest) {
             events,
             userLang: input.userLang,
             interest: input.interest,
+            seed,
           });
-          emit({ type: 'npc', mode: 'character', npc });
         } else {
           // 敏感:生成旁观者 NPC,并告知前端可切换 bystander↔lecturer
           npc = await generateBystander({
@@ -154,10 +158,22 @@ export async function POST(req: NextRequest) {
             reason,
             userLang: input.userLang,
             interest: input.interest,
+            seed,
           });
-          emit({ type: 'npc', mode: 'bystander', npc });
+        }
+        // 命中稀遇:把标签/文案附到 npc 快照(随对话持久化,resume 时徽章仍在),并下发 rare 帧(触发 toast)。
+        if (seed.rare) {
+          npc.rarity = { label: seed.rare.label, flavor: seed.rare.flavor };
+          emit({ type: 'rare', label: seed.rare.label, flavor: seed.rare.flavor });
+        }
+        emit({ type: 'npc', mode, npc });
+        if (mode === 'bystander') {
           emit({ type: 'modeOptions', options: ['bystander', 'lecturer'] });
         }
+
+        // 初始状态:默认基线 + 稀遇覆盖(如隐姓埋名者初始 trust 低)。下发前端渲染状态面板。
+        const initialState = applyOverride(defaultNpcState(), seed.rare?.stateOverride ?? null);
+        emit({ type: 'npcState', state: initialState });
 
         // 6. 保存会话状态(npc 在敏感会话里始终保留,切到 lecturer 时也不丢,以便切回)
         const openingLine = npc?.openingLine ?? '';
@@ -176,6 +192,7 @@ export async function POST(req: NextRequest) {
           lat: input.lat,
           lng: input.lng,
           messages: openingLine ? [{ role: 'assistant', content: openingLine }] : [],
+          state: initialState,
           ...(guestId ? { guestId, guestTurns: 0 } : {}),
         };
         saveSession(state);

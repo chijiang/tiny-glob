@@ -43,9 +43,34 @@ model Conversation {
   messages        Json // ChatMessage[](取代原 Message 关系表)
   // ☆ 收藏标记(原「朋友」概念):单一列表上的筛选
   favorite        Boolean  @default(false)
+  // NPC 状态快照(NpcState,8 维 + perception):每轮更新,resume 时恢复。
+  state           Json?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([userId])
   @@map("Friend")
+}
+
+// 可后台调整的键值配置(如稀遇概率)。value 一律存字符串,读取方自行解析。
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// 稀遇(隐藏)NPC 原型池:数据驱动,后台增删行即可扩展。
+// key=稳定标识;label/flavor 给用户看;directive 注入生成提示词;stateOverride 覆盖初始状态;
+// weight 控制抽取权重;enabled 可临时下线某条。
+model HiddenArchetype {
+  id            String   @id @default(cuid())
+  key           String   @unique
+  label         String
+  flavor        String
+  directive     String
+  stateOverride Json?
+  weight        Int      @default(1)
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }

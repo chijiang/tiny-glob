@@ -20,6 +20,7 @@ const npcSchema = z.object({
   family: z.string(),
   personality: z.string(),
   openingLine: z.string(),
+  rarity: z.object({ label: z.string(), flavor: z.string() }).nullable().optional(),
 });
 const wikiEventSchema = z.object({
   pageid: z.number(),
@@ -31,6 +32,18 @@ const wikiEventSchema = z.object({
 const chatMessageSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string(),
+});
+// NpcState 的 zod 镜像(8 维数值 + perception),用于持久化校验与类型推导。
+const npcStateSchema = z.object({
+  affinity: z.number(),
+  trust: z.number(),
+  respect: z.number(),
+  joy: z.number(),
+  calm: z.number(),
+  vulnerability: z.number(),
+  gratitude: z.number(),
+  curiosity: z.number(),
+  perception: z.string(),
 });
 export const conversationRecordSchema = z.object({
   id: z.string().optional(),
@@ -50,6 +63,8 @@ export const conversationRecordSchema = z.object({
   events: z.array(wikiEventSchema),
   messages: z.array(chatMessageSchema),
   favorite: z.boolean(),
+  // NPC 状态快照(8 维数值 + perception)。resume 时恢复。
+  state: npcStateSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -74,6 +89,7 @@ export function rowToRecord(c: Conversation): ConversationRecord {
     events: (c.events as WikiEvent[]) ?? [],
     messages: (c.messages as ChatMessage[]) ?? [],
     favorite: c.favorite,
+    state: (c.state as ConversationRecord['state']) ?? undefined,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
   };
@@ -121,5 +137,6 @@ export function sessionFromConversation(rec: ConversationRecord, sessionId: stri
     lat: rec.lat,
     lng: rec.lng,
     messages: rec.messages,
+    state: rec.state,
   };
 }

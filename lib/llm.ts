@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { Npc, SensitivityResult, UserLang, WikiEvent } from './types';
+import type { NpcSeed } from './npc-seed';
 import {
   generateBystanderPrompt,
   generateNpcPrompt,
@@ -37,6 +38,7 @@ type BriefOpts = {
   events: WikiEvent[];
   userLang: UserLang;
   interest?: string;
+  seed?: NpcSeed | null;
 };
 
 type BystanderOpts = BriefOpts & { reason?: string };
@@ -157,14 +159,14 @@ async function generateNpcWithInterestRetry(system: string, user: string, intere
 export async function generateNpc(opts: BriefOpts): Promise<Npc> {
   const { system, user } = generateNpcPrompt(opts);
   const interest = opts.interest?.trim();
-  return interest ? generateNpcWithInterestRetry(system, user, interest) : generateNpcJson(system, user, 0.55);
+  return interest ? generateNpcWithInterestRetry(system, user, interest) : generateNpcJson(system, user, 0.65);
 }
 
 /** 旁观者 NPC 生成(敏感事件用,非流式 JSON) */
 export async function generateBystander(opts: BystanderOpts): Promise<Npc> {
   const { system, user } = generateBystanderPrompt(opts);
   const interest = opts.interest?.trim();
-  return interest ? generateNpcWithInterestRetry(system, user, interest) : generateNpcJson(system, user, 0.55);
+  return interest ? generateNpcWithInterestRetry(system, user, interest) : generateNpcJson(system, user, 0.65);
 }
 
 /** 敏感事件 LLM 兜底判定 */

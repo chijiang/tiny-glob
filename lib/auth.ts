@@ -80,7 +80,87 @@ export async function getUserFromRequest(req: NextRequest) {
 
 export { COOKIE_NAME };
 
-// ============ 访客身份 ============
+// ============ 简易后台管理员 ============
+
+const ADMIN_COOKIE = 'tg_admin';
+const ADMIN_MAX_AGE_SEC = 60 * 60 * 12; // 12 小时
+
+export async function signAdminToken(): Promise<string> {
+  return new SignJWT({ admin: true })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(`${ADMIN_MAX_AGE_SEC}s`)
+    .sign(secretKey());
+}
+
+export async function verifyAdminToken(token: string): Promise<boolean> {
+  try {
+    const { payload } = await jwtVerify(token, secretKey(), { algorithms: ['HS256'] });
+    return payload.admin === true;
+  } catch {
+    return false;
+  }
+}
+
+export function setAdminCookie(res: NextResponse, token: string): void {
+  res.cookies.set(ADMIN_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: ADMIN_MAX_AGE_SEC,
+  });
+}
+
+export function clearAdminCookie(res: NextResponse): void {
+  res.cookies.set(ADMIN_COOKIE, '', { httpOnly: true, sameSite: 'lax', path: '/', maxAge: 0 });
+}
+
+/** 请求是否带有效管理员 cookie。后台所有 API 用它鉴权。 */
+export async function isAdminRequest(req: NextRequest): Promise<boolean> {
+  const token = req.cookies.get(ADMIN_COOKIE)?.value;
+  if (!token) return false;
+  return verifyAdminToken(token);
+}
+
+/** 校验管理员账号/密码。凭证存 DB Setting(admin.username / admin.passwordHash),
+ *  不用 env——避免 Next 加载 .env 时把 bcrypt 哈希里的 $ 当变量展开而损坏。 */
+export async function verifyAdminCredentials(username: string, password: string): Promise<boolean> {
+  try {
+    const [u, h] = await Promise.all([
+      prisma.setting.findUnique({ where: { key: 'admin.username' } }),
+      prisma.setting.findUnique({ where: { key: 'admin.passwordHash' } }),
+    ]);
+    if (!u?.value || !h?.value) return false;
+    if (username !== u.value) return false;
+    return bcrypt.compare(password, h.value);
+  } catch {
+    return false;
+  }
+}
+
+/** 修改管理员密码:先校验当前密码,再写入新 bcrypt 哈希。 */
+export async function changeAdminPassword(
+  current: string,
+  next: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const h = await prisma.setting.findUnique({ where: { key: 'admin.passwordHash' } });
+    if (!h?.value) return { ok: false, error: '管理员凭证未初始化' };
+    if (!(await bcrypt.compare(current, h.value))) return { ok: false, error: '当前密码不正确' };
+    const newHash = await bcrypt.hash(next, 10);
+    await prisma.setting.upsert({
+      where: { key: 'admin.passwordHash' },
+      create: { key: 'admin.passwordHash', value: newHash },
+      update: { value: newHash },
+    });
+    return { ok: true };
+  } catch {
+    return { ok: false, error: '修改失败' };
+  }
+}
+
+export { ADMIN_COOKIE };
 
 export async function signGuestToken(guestId: string): Promise<string> {
   return new SignJWT({ guestId })

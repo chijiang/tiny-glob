@@ -12,7 +12,7 @@ import ConversationsPanel, { ConversationListItem } from '@/components/Conversat
 import { useAuth } from '@/lib/auth-context';
 import { getStore } from '@/lib/conversation-store';
 import { MAX_GUEST_ROUNDS, countRounds } from '@/lib/guest-policy';
-import { ChatMessage, ConversationRecord, Npc, SessionMode, UserLang, WikiEvent } from '@/lib/types';
+import { ChatMessage, ConversationRecord, Npc, NpcState, SessionMode, UserLang, WikiEvent } from '@/lib/types';
 
 type Phase = 'idle' | 'picking' | 'researching' | 'chatting';
 type Coords = { lat: number; lng: number };
@@ -60,6 +60,10 @@ export default function Page() {
   const [guestRemaining, setGuestRemaining] = useState<number | null>(null);
   // 访客本段对话已用轮数(权威,模式切换不重置;与服务端 session.guestTurns 对齐)。
   const [guestTurnsUsed, setGuestTurnsUsed] = useState(0);
+  // NPC 状态(8 维 + perception),每轮随对话更新;research 下发初始值,chat 下发更新。
+  const [npcState, setNpcState] = useState<NpcState | null>(null);
+  // 命中稀遇对象时的一次性提示(自动消失)。
+  const [rareToast, setRareToast] = useState<{ label: string; flavor: string } | null>(null);
   const [globeTheme, setGlobeTheme] = useState<GlobeTheme>('night');
 
   const handleHistoryChanged = useCallback((count: number) => {
@@ -114,6 +118,8 @@ export default function Page() {
     setProgressText('');
     setGuestRemaining(null);
     setGuestTurnsUsed(0);
+    setNpcState(null);
+    setRareToast(null);
   };
 
   async function startResearch(y: number, m: number, interestArg?: string) {
@@ -135,6 +141,8 @@ export default function Page() {
     setProgressText('');
     setGuestRemaining(null);
     setGuestTurnsUsed(0);
+    setNpcState(null);
+    setRareToast(null);
 
     try {
       const res = await fetch('/api/research', {
@@ -198,6 +206,12 @@ export default function Page() {
                 setNpc(null);
               }
               break;
+            case 'rare':
+              setRareToast({ label: frame.label, flavor: frame.flavor });
+              break;
+            case 'npcState':
+              setNpcState(frame.state);
+              break;
             case 'modeOptions':
               setModeOptions(frame.options);
               break;
@@ -259,6 +273,7 @@ export default function Page() {
             userMsg,
           ],
           favorite: false,
+          state: npcState ?? undefined,
           createdAt: now,
           updatedAt: now,
         };
@@ -293,14 +308,38 @@ export default function Page() {
       }
       if (!res.ok || !res.body) throw new Error('对话服务不可用');
 
+      // chat 现为 NDJSON 分帧流:{type:'chunk'} 拼出回复正文,{type:'state'} 更新 NPC 状态,{type:'done'} 收尾。
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let acc = '';
+      let buffer = '';
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
-        acc += decoder.decode(value, { stream: true });
-        setAssistantStreaming(acc);
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let frame: any;
+          try {
+            frame = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          switch (frame.type) {
+            case 'chunk':
+              acc += frame.text;
+              setAssistantStreaming(acc);
+              break;
+            case 'state':
+              setNpcState(frame.state);
+              if (cid) void getStore(user).updateState(cid, frame.state);
+              break;
+            case 'done':
+              break;
+          }
+        }
       }
       if (acc.trim()) {
         setMessages((m) => [...m, { role: 'assistant', content: acc }]);
@@ -386,6 +425,7 @@ export default function Page() {
       setCoords(c);
       // 访客恢复:按历史 user 消息重建已用轮数(与服务端 session.guestTurns 一致)。
       setGuestTurnsUsed(user ? 0 : countRounds(full.messages));
+      setNpcState(full.state ?? null);
 
       const res = await fetch('/api/conversations/load', {
         method: 'POST',
@@ -426,6 +466,13 @@ export default function Page() {
     }
     prevUserRef.current = user;
   }, [user, phase]);
+
+  // 稀遇提示自动消失。
+  useEffect(() => {
+    if (!rareToast) return;
+    const t = setTimeout(() => setRareToast(null), 9000);
+    return () => clearTimeout(t);
+  }, [rareToast]);
 
   return (
     <main className="app" data-phase={phase}>
@@ -494,7 +541,16 @@ export default function Page() {
           guestRoundMax={isGuest ? MAX_GUEST_ROUNDS : undefined}
           guestRoundUsed={isGuest ? guestTurnsUsed : undefined}
           notice={guestNotice}
+          state={npcState}
         />
+      )}
+
+      {rareToast && (
+        <div className="toast rare-toast">
+          <strong>✦ 稀遇对象:{rareToast.label}</strong>
+          <span>{rareToast.flavor}</span>
+          <button className="rare-toast-close" onClick={() => setRareToast(null)}>知道了</button>
+        </div>
       )}
 
       <ConversationsPanel

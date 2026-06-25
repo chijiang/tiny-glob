@@ -18,6 +18,7 @@ export interface ConversationStore {
   create(rec: ConversationRecord): Promise<ConversationRecord>;
   appendMessage(id: string, role: 'user' | 'assistant', content: string): Promise<void>;
   updateMode(id: string, mode: SessionMode, messages: ChatMessage[]): Promise<void>;
+  updateState(id: string, state: ConversationRecord['state']): Promise<void>;
   toggleFavorite(id: string): Promise<void>;
   delete(id: string): Promise<void>;
 }
@@ -98,6 +99,14 @@ const LocalStore: ConversationStore = {
     recs[i].updatedAt = new Date().toISOString();
     localWrite(recs);
   },
+  async updateState(id, state) {
+    const recs = localRead();
+    const i = recs.findIndex((r) => (r.id ?? localIdOf(r)) === id);
+    if (i < 0) return;
+    recs[i].state = state;
+    recs[i].updatedAt = new Date().toISOString();
+    localWrite(recs);
+  },
   async toggleFavorite(id) {
     const recs = localRead();
     const i = recs.findIndex((r) => (r.id ?? localIdOf(r)) === id);
@@ -155,6 +164,15 @@ const ServerStore: ConversationStore = {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ op: 'updateMode', mode, messages }),
+      }),
+    );
+  },
+  async updateState(id, state) {
+    await jsonOk(
+      await fetch(`/api/conversations/${id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ op: 'updateState', state }),
       }),
     );
   },
