@@ -16,7 +16,8 @@ export function getClient(): OpenAI {
     const apiKey = process.env.LLM_API_KEY;
     if (!apiKey) throw new Error('LLM_API_KEY 未配置(请检查 .env.local)');
     const baseURL = process.env.LLM_BASE_URL || undefined; // 不填则用 SDK 默认(OpenAI 官方)
-    client = new OpenAI({ apiKey, baseURL });
+    // 关闭 SDK 自带重试(maxRetries:0),统一由下方 withRetry 接管,避免双重重试与叠加退避。
+    client = new OpenAI({ apiKey, baseURL, maxRetries: 0 });
   }
   return client;
 }
@@ -29,6 +30,46 @@ export function getModel(): string {
 // 在此全局关闭。thinking 为 DeepSeek 的 OpenAI 兼容扩展字段;
 // 用展开注入以绕过 OpenAI SDK 对未声明字段的多余属性检查(excess property check)。
 const NO_THINKING = { thinking: { type: 'disabled' as const } };
+
+// ===== 请求重试 =====
+// 网络不稳时 LLM 请求可能间歇性失败(连接重置/超时/限流/5xx)。SDK 自带重试已在
+// maxRetries:0 关闭,统一由此处接管:最多 MAX_LLM_ATTEMPTS 次,仅对可重试错误重试
+// (4xx 立即失败以避免无谓等待),简单线性退避。三次仍失败才向上抛错。
+const MAX_LLM_ATTEMPTS = 3;
+const RETRY_BASE_MS = 500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** 是否值得重试:连接/超时/限流(429)/5xx → 重试;其余 4xx → 立即失败。 */
+function isRetryableLLMError(e: unknown): boolean {
+  if (e == null) return false;
+  const status = (e as { status?: number }).status;
+  if (typeof status === 'number') return status === 429 || status >= 500;
+  const text =
+    `${(e as { constructor?: { name?: string } })?.constructor?.name ?? ''} ${
+      (e as { message?: string })?.message ?? ''
+    }`.toLowerCase();
+  return /connection|timeout|econnreset|etimedout|enotfound|eai_again|socket hang up|fetch failed|network|aborted/.test(
+    text,
+  );
+}
+
+/** 把单次 LLM 调用包成"最多 MAX_LLM_ATTEMPTS 次、仅可重试错误重试"的版本。 */
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MAX_LLM_ATTEMPTS; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (attempt === MAX_LLM_ATTEMPTS || !isRetryableLLMError(e)) throw e;
+      await sleep(RETRY_BASE_MS * attempt); // 500ms、1000ms
+    }
+  }
+  throw lastErr; // 理论不可达
+}
 
 type BriefOpts = {
   placeName: string;
@@ -122,51 +163,86 @@ function isInterestAlignedNpc(npc: Partial<Npc>, interest?: string): boolean {
 }
 
 async function generateNpcJson(system: string, user: string, temperature: number): Promise<Npc> {
-  const res = await getClient().chat.completions.create({
-    model: getModel(),
-    ...NO_THINKING,
-    max_tokens: 4096,
-    temperature,
-    messages: withSystem(system, [{ role: 'user', content: user }]),
-  });
+  const res = await withRetry(() =>
+    getClient().chat.completions.create({
+      model: getModel(),
+      ...NO_THINKING,
+      max_tokens: 4096,
+      temperature,
+      messages: withSystem(system, [{ role: 'user', content: user }]),
+    }),
+  );
   const text = res.choices[0]?.message?.content ?? '';
   const json = extractJson(text);
   return { ...DEFAULT_NPC, ...json, age: Number(json.age) || DEFAULT_NPC.age };
 }
 
-async function generateNpcWithInterestRetry(system: string, user: string, interest: string): Promise<Npc> {
-  const first = await generateNpcJson(system, user, 0.55);
-  if (isInterestAlignedNpc(first, interest)) return first;
+/** 校验生成结果的性别是否与掷骰种子一致;罕见设定类(非简单男女)无法机械判定,放行。 */
+function matchesSeedGender(npc: Partial<Npc>, seed: NpcSeed | null | undefined): boolean {
+  if (!seed) return true;
+  const want = seed.gender;
+  if (want !== '女' && want !== '男') return true;
+  const raw = (npc.gender ?? '').trim().toLowerCase();
+  if (!raw) return false;
+  if (want === '女') return raw.includes('女') || /female|woman|girl|lady/.test(raw);
+  return raw.includes('男') || /male|man|boy/.test(raw);
+}
 
-  const reinforcedUser =
-    user +
-    `\n\n上一次输出不合格,因为它没有让用户一眼看出角色与「${interest}」直接相关,用户无法据此深入讨论该兴趣。\n` +
-    `上一次 JSON:\n${JSON.stringify(first, null, 2)}\n\n` +
-    `请重新生成一个全新的 JSON,并严格满足:\n` +
-    `1. occupation 必须与「${interest}」直接相关,不能是无关职业。\n` +
-    `2. openingLine 要自然提到 ta 正在学/做/关心该领域的事。\n` +
-    `3. 仍然必须是当地同时代的普通人,不是名家或历史名人。\n` +
-    `只输出 JSON。`;
+// 对抗 LLM 默认偏向的确定性兜底:种子掷出的性别/兴趣是【硬约束】,不靠模型自觉。
+// 生成后逐项校验,失败则带上"上次哪里错了"的强化提示重试,期间始终保留最不坏的候选。
+const MAX_NPC_ATTEMPTS = 3;
 
-  try {
-    return await generateNpcJson(system, reinforcedUser, 0.35);
-  } catch {
-    return first;
+async function generateNpcEnforcingSeed(
+  system: string,
+  user: string,
+  seed: NpcSeed | null | undefined,
+  interest: string | undefined,
+): Promise<Npc> {
+  const baseTemp = interest ? 0.55 : 0.65;
+  let best: Npc | null = null;
+  let feedback = '';
+
+  for (let attempt = 1; attempt <= MAX_NPC_ATTEMPTS; attempt++) {
+    const npc = await generateNpcJson(system, feedback ? user + feedback : user, attempt === 1 ? baseTemp : 0.35);
+    const genderOk = matchesSeedGender(npc, seed);
+    const interestOk = !interest || isInterestAlignedNpc(npc, interest);
+
+    // 记忆最不坏的候选:优先性别正确(性别是更硬的人口属性)。
+    if (!best || (!matchesSeedGender(best, seed) && genderOk)) best = npc;
+    if (genderOk && interestOk) return npc;
+
+    const issues: string[] = [];
+    if (!genderOk && seed) {
+      issues.push(
+        `性别硬约束失败:要求「${seed.gender}」,但上次 gender 为「${npc.gender ?? '(空)'}」。` +
+          `这次 gender 必须为「${seed.gender}」,且 name、occupation 都要与此性别一致——姓名用符合该性别的当地名字,职业不要默认男性化。`,
+      );
+    }
+    if (!interestOk && interest) {
+      issues.push(
+        `兴趣关联失败:用户关心「${interest}」,但 occupation(${npc.occupation ?? '(空)'})未能一眼看出与该领域直接相关。` +
+          `occupation 必须直接贴合「${interest}」(如美术学生/法学学生/学徒画师/乐谱誊写员/制琴学徒/自然哲学学生等),openingLine 也要自然带出 ta 正在学/做该领域的事。`,
+      );
+    }
+    feedback =
+      `\n\n【上一次输出不合格,请重新生成一个全新的 JSON 并严格修正,不要原样重复】\n` +
+      issues.map((s) => `- ${s}`).join('\n') +
+      `\n上一次 JSON(仅供参考):\n${JSON.stringify(npc, null, 2)}\n` +
+      `仍然必须是当地同时代的普通人(非名家/历史名人)。只输出 JSON。`;
   }
+  return best!;
 }
 
 /** NPC 生成(非流式 JSON) */
 export async function generateNpc(opts: BriefOpts): Promise<Npc> {
   const { system, user } = generateNpcPrompt(opts);
-  const interest = opts.interest?.trim();
-  return interest ? generateNpcWithInterestRetry(system, user, interest) : generateNpcJson(system, user, 0.65);
+  return generateNpcEnforcingSeed(system, user, opts.seed, opts.interest?.trim());
 }
 
 /** 旁观者 NPC 生成(敏感事件用,非流式 JSON) */
 export async function generateBystander(opts: BystanderOpts): Promise<Npc> {
   const { system, user } = generateBystanderPrompt(opts);
-  const interest = opts.interest?.trim();
-  return interest ? generateNpcWithInterestRetry(system, user, interest) : generateNpcJson(system, user, 0.65);
+  return generateNpcEnforcingSeed(system, user, opts.seed, opts.interest?.trim());
 }
 
 /** 敏感事件 LLM 兜底判定 */
@@ -177,13 +253,15 @@ export async function judgeSensitivity(opts: {
   events: WikiEvent[];
 }): Promise<SensitivityResult> {
   const { system, user } = judgeSensitivityPrompt(opts);
-  const res = await getClient().chat.completions.create({
-    model: getModel(),
-    ...NO_THINKING,
-    max_tokens: 2048,
-    temperature: 0,
-    messages: withSystem(system, [{ role: 'user', content: user }]),
-  });
+  const res = await withRetry(() =>
+    getClient().chat.completions.create({
+      model: getModel(),
+      ...NO_THINKING,
+      max_tokens: 2048,
+      temperature: 0,
+      messages: withSystem(system, [{ role: 'user', content: user }]),
+    }),
+  );
   const text = res.choices[0]?.message?.content ?? '';
   try {
     const j = extractJson(text);
@@ -196,31 +274,46 @@ export async function judgeSensitivity(opts: {
   }
 }
 
-/** 对话流式:返回 ReadableStream,供 route 直接 return */
+/**
+ * 对话流式:返回 ReadableStream,供 route 直接 return。
+ * 网络抖动重试:建连或首个 token 前失败 → 最多重试 MAX_LLM_ATTEMPTS 次。
+ * 一旦已向下游下发过任何正文(sentAny),就不再重试——重发会导致内容重复,只能报错。
+ */
 export async function streamChat(args: {
   system: string;
   messages: { role: 'user' | 'assistant'; content: string }[];
 }): Promise<ReadableStream<Uint8Array>> {
-  const stream = await getClient().chat.completions.create({
-    model: getModel(),
-    ...NO_THINKING,
-    max_tokens: 4096,
-    temperature: 0.7,
-    stream: true,
-    messages: withSystem(args.system, args.messages),
-  });
   const encoder = new TextEncoder();
   return new ReadableStream<Uint8Array>({
     async start(controller) {
-      try {
-        for await (const chunk of stream) {
-          const delta = chunk.choices[0]?.delta?.content;
-          if (delta) controller.enqueue(encoder.encode(delta));
+      for (let attempt = 1; attempt <= MAX_LLM_ATTEMPTS; attempt++) {
+        let sentAny = false;
+        try {
+          const stream = await getClient().chat.completions.create({
+            model: getModel(),
+            ...NO_THINKING,
+            max_tokens: 4096,
+            temperature: 0.7,
+            stream: true,
+            messages: withSystem(args.system, args.messages),
+          });
+          for await (const chunk of stream) {
+            const delta = chunk.choices[0]?.delta?.content;
+            if (delta) {
+              controller.enqueue(encoder.encode(delta));
+              sentAny = true;
+            }
+          }
+          controller.close();
+          return; // 成功完成
+        } catch (e) {
+          // 已下发内容(会重复) / 已到上限 / 不可重试错误 → 终止并报错。
+          if (sentAny || attempt === MAX_LLM_ATTEMPTS || !isRetryableLLMError(e)) {
+            controller.error(e);
+            return;
+          }
+          await sleep(RETRY_BASE_MS * attempt); // 500ms、1000ms,然后重试
         }
-      } catch (e) {
-        controller.error(e);
-      } finally {
-        controller.close();
       }
     },
   });

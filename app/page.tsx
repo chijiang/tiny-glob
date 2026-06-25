@@ -238,12 +238,89 @@ export default function Page() {
     }
   }
 
+  // 把"调用 /api/chat 并消费 NDJSON 流"独立出来,供首次发送与失败重试共用。
+  // 不追加/持久化用户消息(由调用方负责),只负责拿到回复并落库。
+  // 返回 'ok'(成功)/ 'limit'(访客达轮数上限)/ 'error'(失败)。
+  async function runAssistantTurn(text: string, cid: string | null): Promise<'ok' | 'limit' | 'error'> {
+    setAssistantStreaming('');
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId, userMessage: text }),
+      });
+      // 访客达轮数上限:服务端已回滚本轮,客户端锁定本轮(权威计数顶到上限,触发锁定提示)。
+      if (res.status === 403) {
+        const data = await res.json().catch(() => ({} as any));
+        if (data?.reason === 'guest_round_limit') {
+          setGuestTurnsUsed(MAX_GUEST_ROUNDS);
+          return 'limit';
+        }
+      }
+      if (!res.ok || !res.body) throw new Error('对话服务不可用');
+
+      // chat 为 NDJSON 分帧流:{type:'chunk'} 拼回复正文,{type:'state'} 更新 NPC 状态,
+      // {type:'error'} 表示服务端三次重试仍失败,{type:'done'} 收尾。
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = '';
+      let buffer = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let frame: any;
+          try {
+            frame = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          switch (frame.type) {
+            case 'chunk':
+              acc += frame.text;
+              setAssistantStreaming(acc);
+              break;
+            case 'state':
+              setNpcState(frame.state);
+              if (cid) void getStore(user).updateState(cid, frame.state);
+              break;
+            case 'error':
+              // 服务端三次重试仍失败:本轮失败,交调用方标记重试按钮。
+              throw new Error(frame.message || '对话出错');
+            case 'done':
+              break;
+          }
+        }
+      }
+      if (acc.trim()) {
+        setMessages((m) => [...m, { role: 'assistant', content: acc }]);
+        if (cid) void getStore(user).appendMessage(cid, 'assistant', acc);
+      }
+      setAssistantStreaming('');
+      // 一轮完成(用户已发言 + 收到回复):访客权威轮数 +1。
+      if (!user) setGuestTurnsUsed((n) => n + 1);
+      return 'ok';
+    } catch {
+      setAssistantStreaming('');
+      return 'error';
+    }
+  }
+
+  // 把指定 id 的用户消息标记/清除"失败"态(失败态展示重试按钮)。
+  const markFailed = (id: string, failed: boolean) =>
+    setMessages((m) => m.map((mm) => (mm.id === id ? { ...mm, failed } : mm)));
+
   async function sendChat(text: string) {
     if (!sessionId || chatBusy) return;
     setChatBusy(true);
-    setAssistantStreaming('');
+    setError(null);
 
-    const userMsg: ChatMessage = { role: 'user', content: text };
+    const id = crypto.randomUUID();
+    const userMsg: ChatMessage = { role: 'user', content: text, id };
     setMessages((m) => [...m, userMsg]);
 
     // 持久化:首条用户消息 → 创建对话记录(含地区简介/事件/NPC 快照);否则追加用户消息。
@@ -290,69 +367,27 @@ export default function Page() {
       /* 持久化失败不影响对话 */
     }
 
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ sessionId, userMessage: text }),
-      });
-      // 访客达轮数上限:回滚乐观消息并锁定本轮(权威计数顶到上限,触发锁定提示)。
-      if (res.status === 403) {
-        const data = await res.json().catch(() => ({} as any));
-        if (data?.reason === 'guest_round_limit') {
-          setMessages((m) => m.slice(0, -1)); // 去掉刚加的用户消息
-          setAssistantStreaming('');
-          setGuestTurnsUsed(MAX_GUEST_ROUNDS);
-          return;
-        }
-      }
-      if (!res.ok || !res.body) throw new Error('对话服务不可用');
-
-      // chat 现为 NDJSON 分帧流:{type:'chunk'} 拼出回复正文,{type:'state'} 更新 NPC 状态,{type:'done'} 收尾。
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let acc = '';
-      let buffer = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          let frame: any;
-          try {
-            frame = JSON.parse(line);
-          } catch {
-            continue;
-          }
-          switch (frame.type) {
-            case 'chunk':
-              acc += frame.text;
-              setAssistantStreaming(acc);
-              break;
-            case 'state':
-              setNpcState(frame.state);
-              if (cid) void getStore(user).updateState(cid, frame.state);
-              break;
-            case 'done':
-              break;
-          }
-        }
-      }
-      if (acc.trim()) {
-        setMessages((m) => [...m, { role: 'assistant', content: acc }]);
-        if (cid) void getStore(user).appendMessage(cid, 'assistant', acc);
-      }
-      setAssistantStreaming('');
-      // 一轮完成(用户已发言 + 收到回复):访客权威轮数 +1。
-      if (!user) setGuestTurnsUsed((n) => n + 1);
-    } catch (e: any) {
-      setError(e?.message ?? '对话出错');
-    } finally {
-      setChatBusy(false);
+    const result = await runAssistantTurn(text, cid);
+    if (result === 'limit') {
+      // 访客达上限:服务端已回滚,本地移除这条未生效的用户消息。
+      setMessages((m) => m.filter((mm) => mm.id !== id));
+    } else if (result === 'error') {
+      markFailed(id, true); // 标记失败 → 展示重试按钮(仅失败消息可重试,正常消息不可)
     }
+    setChatBusy(false);
+  }
+
+  // 失败消息重试:不清空历史、不重复追加/持久化用户消息(服务端已回滚),只重跑一轮助手回复。
+  async function retryMessage(messageId: string) {
+    if (!sessionId || chatBusy) return;
+    const target = messages.find((m) => m.id === messageId);
+    if (!target || target.role !== 'user') return;
+    setChatBusy(true);
+    setError(null);
+    markFailed(messageId, false); // 先清除失败态,进入"重试中"
+    const result = await runAssistantTurn(target.content, conversationId);
+    if (result !== 'ok') markFailed(messageId, true); // 仍失败则重新标记
+    setChatBusy(false);
   }
 
   async function handleSwitchMode() {
@@ -535,6 +570,7 @@ export default function Page() {
           onToggleFavorite={toggleFavorite}
           brief={{ placeName, country, text: summary }}
           onSend={sendChat}
+          onRetry={retryMessage}
           onClose={reset}
           onSwitchMode={modeOptions ? handleSwitchMode : undefined}
           guest={isGuest}

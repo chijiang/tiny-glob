@@ -50,6 +50,8 @@ export type NpcState = {
 export type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
+  id?: string; // 客户端生成的稳定 id(用于失败重试定位 & 作为 React key)
+  failed?: boolean; // 仅客户端 UI 态:该用户消息未收到回复(发送失败)→ 展示重试按钮。不持久化语义。
 };
 
 export type SessionMode = 'character' | 'bystander' | 'lecturer';

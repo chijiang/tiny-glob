@@ -330,6 +330,44 @@ button.primary:hover:not(:disabled) {
   align-self: flex-end;
   background: var(--user-bubble);
 }
+/* 发送失败的用户消息:边框/底色变红,下方挂"发送失败 + 重试"。
+   仅 failed 的消息会带 .failed;正常消息不会出现重试按钮。 */
+.bubble.user.failed {
+  background: rgba(255, 94, 58, 0.16);
+  border: 1px solid rgba(255, 94, 58, 0.5);
+}
+.bubble-failed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 94, 58, 0.32);
+  font-size: 12px;
+  color: var(--accent-dim);
+}
+.bubble-failed-text {
+  line-height: 1.4;
+}
+.bubble-retry {
+  margin-left: auto;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+  font-size: 12px;
+  padding: 3px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.bubble-retry:hover:not(:disabled) {
+  background: var(--accent-dim);
+  border-color: var(--accent-dim);
+}
+.bubble-retry:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 .chat-input {
   display: flex;

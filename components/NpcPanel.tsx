@@ -14,6 +14,8 @@ type Props = {
   currentMode?: SessionMode; // 当前模式(决定切换按钮文案)
   sensitiveReason?: string; // 旁观者模式副标题展示
   onSend: (text: string) => void;
+  /** 失败的用户消息点"重试":仅 failed 的消息会出现重试按钮,正常消息不会。 */
+  onRetry?: (messageId: string) => void;
   onClose: () => void;
   onSwitchMode?: () => void;
   /** ☆ 收藏切换(匿名也能用,存本地);讲师模式亦可收藏 */
@@ -41,6 +43,7 @@ export default function NpcPanel({
   currentMode,
   sensitiveReason,
   onSend,
+  onRetry,
   onClose,
   onSwitchMode,
   favorite,
@@ -196,8 +199,23 @@ export default function NpcPanel({
 
       <div className="chat-log" ref={logRef}>
         {messages.map((m, i) => (
-          <div key={i} className={`bubble ${m.role}`}>
+          <div key={m.id ?? i} className={`bubble ${m.role}${m.failed ? ' failed' : ''}`}>
             {m.content}
+            {m.role === 'user' && m.failed && (
+              <div className="bubble-failed">
+                <span className="bubble-failed-text">发送失败</span>
+                {m.id && onRetry && (
+                  <button
+                    className="bubble-retry"
+                    onClick={() => onRetry(m.id!)}
+                    disabled={busy}
+                    title="重新发送这条消息"
+                  >
+                    重试
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         ))}
         {assistantStreaming !== '' && (

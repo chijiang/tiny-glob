@@ -50,6 +50,11 @@ export async function POST(req: NextRequest) {
     session.guestTurns = turns + 1;
   }
 
+  // 失败回滚点:本轮若 LLM 失败(三次重试仍失败),需撤回刚追加的 user 消息
+  // (否则客户端点"重试"会让同一条 user 消息重复入栈上下文),并退还访客已扣的轮数
+  // (否则一次网络抖动就让访客白白损失一轮)。
+  const beforeMsgLen = session.messages.length;
+  const prevGuestTurns = session.guestId ? (session.guestTurns ?? 0) - 1 : undefined;
   appendMessage(input.sessionId, 'user', input.userMessage);
 
   const system =
@@ -170,6 +175,9 @@ export async function POST(req: NextRequest) {
         if (narrative.trim()) appendMessage(input.sessionId, 'assistant', narrative);
         emit({ type: 'done' });
       } catch {
+        // 本轮失败:回滚 user 消息与访客轮数,使客户端重试不会重复入栈 / 双扣轮数。
+        if (session.messages.length > beforeMsgLen) session.messages.length = beforeMsgLen;
+        if (prevGuestTurns !== undefined) session.guestTurns = prevGuestTurns;
         try {
           emit({ type: 'error', message: '对话出错' });
         } catch {
