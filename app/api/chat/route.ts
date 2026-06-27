@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { appendMessage, getSession } from '@/lib/runtime-state';
 import { streamChat } from '@/lib/llm';
-import { chatBystanderSystem, chatCharacterSystem, chatLecturerSystem, NPC_STATE_SENTINEL } from '@/lib/prompts';
+import { chatBystanderSystem, chatCharacterSystem, chatLecturerSystem, findNarrativeCut, NARRATIVE_HOLDBACK } from '@/lib/prompts';
 import { MAX_GUEST_ROUNDS } from '@/lib/guest-policy';
 import { sanitizeState } from '@/lib/npc-state';
 import { NpcState } from '@/lib/types';
@@ -97,11 +97,14 @@ export async function POST(req: NextRequest) {
   const llmStream = await streamChat({ system, messages: session.messages });
 
   // 拦截流:把 LLM 的纯文本输出解析成 NDJSON 分帧。
-  //  - 哨兵 @@NPCSTATE@@ 之前:角色回复正文 → {type:'chunk'} 实时下发(打字机效果),并累积为 narrative。
-  //  - 哨兵之后:状态 JSON → 解析、净化(限幅/越界裁剪)→ {type:'state'},并更新 session.state。
-  //  - 仅 character/bystander 会带哨兵(其 system 提示含输出格式);lecturer 无哨兵,全部当正文。
-  // 滚动缓冲保证跨块的哨兵也能识别:每轮只外发"确定不含哨兵"的前缀,尾部留作下轮判定。
-  const sLen = NPC_STATE_SENTINEL.length;
+  //  - 截断点(哨兵 @@NPCSTATE@@ 或脚手架标题,如"【你此刻的内心状态】")之前:
+  //    角色回复正文 → {type:'chunk'} 实时下发(打字机效果),并累积为 narrative。
+  //  - 截断点之后:当作状态区,尝试解析状态 JSON → 净化(限幅/越界裁剪)→ {type:'state'},并更新 session.state。
+  //    把脚手架标题也当截断点,是为了兜住弱模型把系统提示词小节标题泄泄进回复的情况,
+  //    保证用户永远看不到提示词内部文字。
+  //  - 仅 character/bystander 会带状态输出;lecturer 无哨兵,通常全部当正文(除非也泄了脚手架标题)。
+  // 滚动缓冲保证跨块的标记也能识别:每轮只外发"确定不含标记前缀"的前缀,尾部留作下轮判定。
+  const holdback = NARRATIVE_HOLDBACK;
   const ndjson = new ReadableStream<Uint8Array>({
     async start(controller) {
       const encoder = new TextEncoder();
@@ -131,30 +134,30 @@ export async function POST(req: NextRequest) {
             continue;
           }
           buf += text;
-          const idx = buf.indexOf(NPC_STATE_SENTINEL);
+          const idx = findNarrativeCut(buf);
           if (idx !== -1) {
             flushHead(buf.slice(0, idx));
-            stateBuf = buf.slice(idx + sLen);
+            stateBuf = buf.slice(idx); // 含标记本身,parseStateJson 仍能从中找到 JSON
             inState = true;
             buf = '';
-          } else if (buf.length > sLen) {
-            // 外发除最后 sLen 个字符外的前缀(尾部可能是哨兵的前缀)。
-            const head = buf.slice(0, buf.length - sLen);
+          } else if (buf.length > holdback) {
+            // 外发除最后 holdback 个字符外的前缀(尾部可能是某个标记的前缀)。
+            const head = buf.slice(0, buf.length - holdback);
             flushHead(head);
-            buf = buf.slice(buf.length - sLen);
+            buf = buf.slice(buf.length - holdback);
           }
         }
-        // 收尾:冲刷解码器残余,并处理最后缓冲里的哨兵/正文。
+        // 收尾:冲刷解码器残余,并处理最后缓冲里的标记/正文。
         const tail = decoder.decode();
         if (tail) {
           if (inState) stateBuf += tail;
           else buf += tail;
         }
         if (!inState) {
-          const idx = buf.indexOf(NPC_STATE_SENTINEL);
+          const idx = findNarrativeCut(buf);
           if (idx !== -1) {
             flushHead(buf.slice(0, idx));
-            stateBuf = buf.slice(idx + sLen);
+            stateBuf = buf.slice(idx);
             inState = true;
           } else {
             flushHead(buf);

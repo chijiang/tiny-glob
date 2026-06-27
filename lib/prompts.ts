@@ -41,6 +41,33 @@ function outputFormatRule(): string {
 /** 导出哨兵,供 chat 路由解析使用。 */
 export const NPC_STATE_SENTINEL = SENTINEL;
 
+/**
+ * 系统提示词的"脚手架"标记:这些小节标题(及状态哨兵)只用于指导模型,绝不应出现在
+ * 给用户的回复正文里。弱模型(如 Gemini Flash Lite)偶尔会把它们泄泄到回复中——例如
+ * 直接吐出"【你此刻的内心状态】"。chat 路由以其中最早出现者作为正文截断点,保证用户
+ * 看到的永远是干净的角色对话,而截断点之后的内容仍会尝试解析出状态 JSON。
+ */
+export const NARRATIVE_CUT_MARKERS: readonly string[] = [
+  NPC_STATE_SENTINEL, // @@NPCSTATE@@(正常状态分隔)
+  '【你此刻的内心状态', // stateBlock 的标题
+  '【输出格式', // outputFormatRule 的标题
+  '【硬约束', // chatCharacterSystem 的硬约束标题
+  '【关键设定', // chatBystanderSystem 的关键设定标题
+];
+
+/** 截断扫描的尾部留白:取最长标记的长度,保证跨块的"半个标记"不会被提前当正文外发。 */
+export const NARRATIVE_HOLDBACK = Math.max(...NARRATIVE_CUT_MARKERS.map((m) => m.length));
+
+/** 返回 text 中最早的脚手架标记起始位置;都没有返回 -1。 */
+export function findNarrativeCut(text: string): number {
+  let cut = -1;
+  for (const m of NARRATIVE_CUT_MARKERS) {
+    const i = text.indexOf(m);
+    if (i !== -1 && (cut === -1 || i < cut)) cut = i;
+  }
+  return cut;
+}
+
 /** 把掷骰得到的种子拼成【硬约束】文本,注入 NPC 生成提示词。 */
 function seedConstraints(seed: NpcSeed | null | undefined): string {
   if (!seed) return '';
